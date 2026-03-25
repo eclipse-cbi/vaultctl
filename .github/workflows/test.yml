@@ -69,7 +69,8 @@ jobs:
           # Remove local vaultctl.sh to force download
           mv vaultctl.sh vaultctl.sh.backup
           
-          # This should download from GitHub
+          # Create directory and download from GitHub
+          mkdir -p $HOME/.local/bin
           ./install.sh $HOME/.local/bin || {
             echo "Installation failed, restoring backup"
             mv vaultctl.sh.backup vaultctl.sh
