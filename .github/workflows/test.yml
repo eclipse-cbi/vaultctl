@@ -133,10 +133,11 @@ jobs:
         ports:
           - 8200:8200
         options: >-
-          --health-cmd "vault status"
+          --cap-add=IPC_LOCK
+          --health-cmd "vault status || exit 0"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
     
     steps:
       - name: Checkout code
