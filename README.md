@@ -43,6 +43,7 @@
     - [Cache Management](#cache-management)
   - [Performance Tips](#performance-tips)
   - [Contributing](#contributing)
+  - [AI-Assisted Development](#ai-assisted-development)
   - [License](#license)
 
 
@@ -505,6 +506,10 @@ Contributions are welcome! Please ensure:
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
+## AI-Assisted Development
+
+Parts of this codebase were developed with the assistance of AI tools including GitHub Copilot. These tools helped accelerate development while maintaining code quality and consistency with Eclipse Foundation services.
+
 ## License
 
 Copyright (c) 2026 Eclipse Foundation and others.
@@ -514,7 +519,3 @@ This program and the accompanying materials are made available under the terms o
 SPDX-License-Identifier: EPL-2.0
 
 See [LICENSE](LICENSE) file for full license text.
-
----
-
-**Note:** Some portions of this project were generated with the assistance of GitHub Copilot.
