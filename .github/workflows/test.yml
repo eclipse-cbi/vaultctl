@@ -35,6 +35,7 @@ jobs:
 
       - name: Test local installation
         run: |
+          mkdir -p $HOME/.local/bin
           ./install.sh $HOME/.local/bin
           ls -la $HOME/.local/bin/vaultctl
           file $HOME/.local/bin/vaultctl
