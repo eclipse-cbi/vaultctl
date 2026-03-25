@@ -1,0 +1,44 @@
+# Vault token and config files
+.vault-token
+.vaultctl
+.vaultctl_cache/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Editor directories and files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Backup files
+*.bak
+*.backup
+
+# Test output
+test_output/
+*.test
+
+# Local environment files
+.env
+.env.local
+.env.*.local

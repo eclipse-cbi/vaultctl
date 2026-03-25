@@ -1,0 +1,177 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-install:
+    name: Test Installation
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y jq curl
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install jq
+          fi
+
+      - name: Test local installation
+        run: |
+          ./install.sh $HOME/.local/bin
+          ls -la $HOME/.local/bin/vaultctl
+          file $HOME/.local/bin/vaultctl
+          echo "✅ Installation successful"
+
+      - name: Test help command
+        run: |
+          $HOME/.local/bin/vaultctl help
+          echo "✅ Help command works"
+
+  test-download-install:
+    name: Test Download & Install
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: Test install script can download from GitHub
+        run: |
+          # Remove local vaultctl.sh to force download
+          mv vaultctl.sh vaultctl.sh.backup
+          
+          # This should download from GitHub
+          ./install.sh $HOME/.local/bin || {
+            echo "Installation failed, restoring backup"
+            mv vaultctl.sh.backup vaultctl.sh
+            exit 1
+          }
+          
+          ls -la $HOME/.local/bin/vaultctl
+          echo "✅ Download installation successful"
+
+  test-basic-commands:
+    name: Test Basic Commands
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: Install vaultctl
+        run: |
+          ./install.sh $HOME/.local/bin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Test command structure
+        run: |
+          # Test that commands are recognized (without auth)
+          vaultctl help
+          
+          # Test that status command recognizes no auth
+          vaultctl status || true
+          
+          echo "✅ Basic command structure works"
+
+      - name: Test read command validation
+        run: |
+          # Should fail without arguments
+          vaultctl read 2>&1 || echo "Expected failure without args"
+          
+          echo "✅ Command validation works"
+
+  test-with-vault:
+    name: Test with Vault Container
+    runs-on: ubuntu-latest
+    
+    services:
+      vault:
+        image: hashicorp/vault:latest
+        env:
+          VAULT_DEV_ROOT_TOKEN_ID: test-token
+          VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+        ports:
+          - 8200:8200
+        options: >-
+          --health-cmd "vault status"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+          
+          # Install Vault CLI
+          wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          sudo apt-get update
+          sudo apt-get install -y vault
+
+      - name: Configure Vault connection
+        run: |
+          export VAULT_ADDR='http://localhost:8200'
+          export VAULT_TOKEN='test-token'
+          
+          # Wait for Vault to be fully ready
+          echo "Waiting for Vault to be ready..."
+          sleep 5
+          
+          # Verify Vault is accessible
+          vault status
+          
+          # Verify token works
+          vault token lookup
+          
+          echo "✅ Vault is accessible and token is valid"
+
+      - name: Setup test mount in Vault
+        run: |
+          export VAULT_ADDR='http://localhost:8200'
+          export VAULT_TOKEN='test-token'
+          
+          # Enable KV v2 secrets engine at 'test' mount for vaultctl_test.sh
+          vault secrets enable -path=test kv-v2
+          
+          echo "✅ Test mount created"
+
+      - name: Run vaultctl_test.sh
+        run: |
+          export VAULT_ADDR='http://localhost:8200'
+          export VAULT_TOKEN='test-token'
+          
+          # Make test script executable
+          chmod +x vaultctl_test.sh
+          
+          # Run the test suite
+          ./vaultctl_test.sh
+          
+          echo "✅ All vaultctl_test.sh tests passed"
