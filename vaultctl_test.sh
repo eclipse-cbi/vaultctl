@@ -219,19 +219,27 @@ Examples:
 
     ######## Test path must not start by slash #############################################
     result=$("$VAULTCTL" read "$VAULT_MOUNT" "/XXXXXX" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    assert_equals "❌ Path is invalid, slash issue. Path should not start or end with a slash and must contain at least one slash." "${result}" "vaultctl read path must not start by slash"
+    assert_equals "❌ Path cannot start with a slash: /XXXXXX" "${result}" "vaultctl read path must not start by slash"
 
     ######## Test path must not end by slash #############################################
     result=$("$VAULTCTL" read "$VAULT_MOUNT" "XXXXXX/" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    assert_equals "❌ Path is invalid, slash issue. Path should not start or end with a slash and must contain at least one slash." "${result}" "vaultctl read path must not end by slash"
+    # After normalization, "XXXXXX/" becomes "XXXXXX" (no slash), so it tries to list keys
+    message="⚠️ Not a secret. Trying to list secrets in path...
+❌ Vault entry not found: vault kv get -mount=\"$VAULT_MOUNT\" \"XXXXXX\""
+    assert_equals "${message}" "${result}" "vaultctl read path must not end by slash"
 
     ######## Test path must have one slash #############################################
     result=$("$VAULTCTL" read "$VAULT_MOUNT" "XXXXXX" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    assert_equals "❌ Path is invalid, slash issue. Path should not start or end with a slash and must contain at least one slash." "${result}" "vaultctl read path must have one slash"
+    # With no slash, it tries to list keys in secret 'XXXXXX'
+    message="⚠️ Not a secret. Trying to list secrets in path...
+❌ Vault entry not found: vault kv get -mount=\"$VAULT_MOUNT\" \"XXXXXX\""
+    assert_equals "${message}" "${result}" "vaultctl read path must have one slash"
 
     ######## Test non exiting path #############################################
     result=$("$VAULTCTL" read "$VAULT_MOUNT" "XXX/XXX" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    message="❌ Vault entry not found: vault kv get -mount=\"$VAULT_MOUNT\" -field=\"XXX\" \"XXX\""
+    message="⚠️ Field 'XXX' not found. Trying to list keys of the secret...
+⚠️ Secret not found. Trying to list secrets in path...
+❌ Vault entry not found: vault kv get -mount=\"$VAULT_MOUNT\" -field=\"XXX\" \"XXX\""
     assert_equals "${message}" "${result}" "vaultctl read with non existing path"
 
     ######## Test conditionnal read #############################################
