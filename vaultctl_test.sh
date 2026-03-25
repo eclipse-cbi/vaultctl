@@ -183,24 +183,38 @@ test_vaultctl_read_errors() {
 
     ######## Test missing mount #############################################
     result=$("$VAULTCTL" read "" "$VAULT_PATH" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    message="❌ Usage: vaultctl read <mount> <path>
+    message="❌ Usage: vaultctl read [-b] [-v] <mount> <path>
 
-NOTE: path is the full path to the secret, including the field name
+NOTE: path can be either a secret name (to list keys) or secret/field
+
+Options:
+  -b, --batch    Silent mode: suppress all messages, only return exit code
+  -v, --verbose  Verbose mode: display vault commands being executed
 
 Examples:
+  vaultctl read cbi technology.cbi # List keys in secret 'technology.cbi'
   vaultctl read users <username>/cbi/JENKINS_USERNAME
-  vaultctl read cbi technology.cbi/github.com/api-token"
+  vaultctl read cbi technology.cbi/github.com/api-token
+  vaultctl read -b cbi technology.cbi/github.com/api-token && echo ok
+  vaultctl read -v cbi technology.cbi/github.com/api-token"
     assert_equals "${message}" "${result}" "vaultctl read with missing mount"
 
     ######## Test missing path #############################################
     result=$("$VAULTCTL" read "$VAULT_MOUNT" "" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    message="❌ Usage: vaultctl read <mount> <path>
+    message="❌ Usage: vaultctl read [-b] [-v] <mount> <path>
 
-NOTE: path is the full path to the secret, including the field name
+NOTE: path can be either a secret name (to list keys) or secret/field
+
+Options:
+  -b, --batch    Silent mode: suppress all messages, only return exit code
+  -v, --verbose  Verbose mode: display vault commands being executed
 
 Examples:
+  vaultctl read cbi technology.cbi # List keys in secret 'technology.cbi'
   vaultctl read users <username>/cbi/JENKINS_USERNAME
-  vaultctl read cbi technology.cbi/github.com/api-token"
+  vaultctl read cbi technology.cbi/github.com/api-token
+  vaultctl read -b cbi technology.cbi/github.com/api-token && echo ok
+  vaultctl read -v cbi technology.cbi/github.com/api-token"
     assert_equals "${message}" "${result}" "vaultctl read with missing path"
 
     ######## Test path must not start by slash #############################################
