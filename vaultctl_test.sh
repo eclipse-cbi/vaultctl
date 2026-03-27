@@ -111,57 +111,57 @@ test_vaultctl_write_read() {
 
     ######## Test writing a simple value #############################################
     "$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "$VAULT_KEY_1"="$VAULT_VALUE_1"
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_1")
+    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     assert_equals "$VAULT_VALUE_1" "$result" "vaultctl write and read for simple value"
     
     ######## Test overwriting a simple value #############################################
     "$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "$VAULT_KEY_1"="$VAULT_VALUE_2"
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_1")
+    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     assert_equals "$VAULT_VALUE_2" "$result" "vaultctl write and read for overwritting same field"
 
     ######## Test writing add a new fields #############################################
     "$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "$VAULT_KEY_2"="$VAULT_VALUE_2"
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_2")
+    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_2" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     assert_equals "$VAULT_VALUE_2" "$result" "vaultctl write and read for simple value"
 
     ######## Test writing from stdin #############################################
     echo "$VAULT_VALUE_3" | "$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "$VAULT_KEY_3=-"
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_3")
+    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_3" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     assert_equals "$VAULT_VALUE_3" "$result" "vaultctl write and read from stdin"
 
     ######## Test writing from stdin mixed with value #############################################
     echo "$VAULT_VALUE_2" | "$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "$VAULT_KEY_1=$VAULT_VALUE_3" "$VAULT_KEY_3=-"
-    result1=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_1")
-    result2=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_3")
+    result1=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+    result2=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_3" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     assert_equals "$VAULT_VALUE_3" "$result1" "vaultctl write and read from stdin mixed with value"
     assert_equals "$VAULT_VALUE_2" "$result2" "vaultctl write and read from stdin mixed with value"
 
     ######## Test writing patch both fields #############################################
     "$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "$VAULT_KEY_1=$VAULT_VALUE_1" "$VAULT_KEY_2=$VAULT_VALUE_1"
-    result1=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_1")
-    result2=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_2")
+    result1=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+    result2=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/$VAULT_KEY_2" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     assert_equals "$VAULT_VALUE_1" "$result1" "vaultctl write and read patch first key"
     assert_equals "$VAULT_VALUE_1" "$result2" "vaultctl write and read patch second key"
 
     ######## Test writing a key and a value from a file #############################################
     "$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "@$VAULT_FILE_PATH"
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/file_key_value_test")
+    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/file_key_value_test" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     assert_equals "file_secret_value" "$result" "vaultctl write and read for file key/value content"
 
     ######## Test writing only a value from a file 1 #############################################
     "$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "import_file1=@$VAULT_FILE_PATH"
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/import_file1")
+    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/import_file1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     assert_equals "$(cat "$VAULT_FILE_PATH")" "$result" "vaultctl write and read for file content"
 
     ######## Test writing only a value from a file 2 #############################################
     "$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "import_file2=-" < "$VAULT_FILE_PATH"
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/import_file2")
+    result=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/import_file2" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     assert_equals "$(cat "$VAULT_FILE_PATH")" "$result" "vaultctl write and read for file content"
 
     ######## Test writing multiple files #############################################
     "$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "import_multi_file1=@$VAULT_FILE_PATH1" "import_multi_file2=@$VAULT_FILE_PATH2"
-    result1=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/import_multi_file1")
-    result2=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/import_multi_file2")
+    result1=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/import_multi_file1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+    result2=$("$VAULTCTL" read "$VAULT_MOUNT" "$VAULT_PATH/import_multi_file2" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     assert_equals "$(cat "$VAULT_FILE_PATH1")" "$result1" "vaultctl write and read for file content1"
     assert_equals "$(cat "$VAULT_FILE_PATH2")" "$result2" "vaultctl write and read for file content2"
 
@@ -180,11 +180,22 @@ test_vaultctl_write_read() {
 test_vaultctl_read_errors() {
     local result
     local message
+    local config_file="$HOME/.vaultctl"
+    
+    # Backup and clear config to ensure clean state for error tests
+    local backup_file=""
+    if [[ -f "$config_file" ]]; then
+        backup_file=$(mktemp)
+        cp "$config_file" "$backup_file"
+        rm -f "$config_file"
+    fi
+    unset VAULT_MOUNT
 
     ######## Test missing mount #############################################
     result=$("$VAULTCTL" read "" "$VAULT_PATH" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    message="❌ Usage: vaultctl read [-b] [-v] <mount> <path>
+    message="❌ Usage: vaultctl read [-b] [-v] [<mount>] <path>
 
+NOTE: If mount is not specified, VAULT_MOUNT environment variable or config will be used
 NOTE: path can be either a secret name (to list keys) or secret/field
 
 Options:
@@ -192,7 +203,9 @@ Options:
   -v, --verbose  Verbose mode: display vault commands being executed
 
 Examples:
-  vaultctl read cbi technology.cbi # List keys in secret 'technology.cbi'
+  vaultctl config VAULT_MOUNT=cbi  # Set default mount
+  vaultctl read technology.cbi/github.com/api-token  # Uses default mount
+  vaultctl read cbi technology.cbi  # List keys in secret 'technology.cbi'
   vaultctl read users <username>/cbi/JENKINS_USERNAME
   vaultctl read cbi technology.cbi/github.com/api-token
   vaultctl read -b cbi technology.cbi/github.com/api-token && echo ok
@@ -200,9 +213,10 @@ Examples:
     assert_equals "${message}" "${result}" "vaultctl read with missing mount"
 
     ######## Test missing path #############################################
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    message="❌ Usage: vaultctl read [-b] [-v] <mount> <path>
+    result=$("$VAULTCTL" read "test" "" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    message="❌ Usage: vaultctl read [-b] [-v] [<mount>] <path>
 
+NOTE: If mount is not specified, VAULT_MOUNT environment variable or config will be used
 NOTE: path can be either a secret name (to list keys) or secret/field
 
 Options:
@@ -210,7 +224,9 @@ Options:
   -v, --verbose  Verbose mode: display vault commands being executed
 
 Examples:
-  vaultctl read cbi technology.cbi # List keys in secret 'technology.cbi'
+  vaultctl config VAULT_MOUNT=cbi  # Set default mount
+  vaultctl read technology.cbi/github.com/api-token  # Uses default mount
+  vaultctl read cbi technology.cbi  # List keys in secret 'technology.cbi'
   vaultctl read users <username>/cbi/JENKINS_USERNAME
   vaultctl read cbi technology.cbi/github.com/api-token
   vaultctl read -b cbi technology.cbi/github.com/api-token && echo ok
@@ -218,107 +234,303 @@ Examples:
     assert_equals "${message}" "${result}" "vaultctl read with missing path"
 
     ######## Test path must not start by slash #############################################
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "/XXXXXX" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    result=$("$VAULTCTL" read "test" "/XXXXXX" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     assert_equals "❌ Path cannot start with a slash: /XXXXXX" "${result}" "vaultctl read path must not start by slash"
 
     ######## Test path must not end by slash #############################################
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "XXXXXX/" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    result=$("$VAULTCTL" read "test" "XXXXXX/" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     # After normalization, "XXXXXX/" becomes "XXXXXX" (no slash), so it tries to list keys
     message="⚠️ Not a secret. Trying to list secrets in path...
-❌ Vault entry not found: vault kv get -mount=\"$VAULT_MOUNT\" \"XXXXXX\""
+❌ Vault entry not found: vault kv get -mount=\"test\" \"XXXXXX\""
     assert_equals "${message}" "${result}" "vaultctl read path must not end by slash"
 
     ######## Test path must have one slash #############################################
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "XXXXXX" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    result=$("$VAULTCTL" read "test" "XXXXXX" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     # With no slash, it tries to list keys in secret 'XXXXXX'
     message="⚠️ Not a secret. Trying to list secrets in path...
-❌ Vault entry not found: vault kv get -mount=\"$VAULT_MOUNT\" \"XXXXXX\""
+❌ Vault entry not found: vault kv get -mount=\"test\" \"XXXXXX\""
     assert_equals "${message}" "${result}" "vaultctl read path must have one slash"
 
     ######## Test non exiting path #############################################
-    result=$("$VAULTCTL" read "$VAULT_MOUNT" "XXX/XXX" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    result=$("$VAULTCTL" read "test" "XXX/XXX" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     message="⚠️ Field 'XXX' not found. Trying to list keys of the secret...
 ⚠️ Secret not found. Trying to list secrets in path...
-❌ Vault entry not found: vault kv get -mount=\"$VAULT_MOUNT\" -field=\"XXX\" \"XXX\""
+❌ Vault entry not found: vault kv get -mount=\"test\" -field=\"XXX\" \"XXX\""
     assert_equals "${message}" "${result}" "vaultctl read with non existing path"
 
     ######## Test conditionnal read #############################################
-    if ! "$VAULTCTL" read "$VAULT_MOUNT" "XXX/XXX" &> /dev/null ; then
+    if ! "$VAULTCTL" read "test" "XXX/XXX" &> /dev/null ; then
         echo -e "INFO: vaultctl read conditionnal test non existing path \u2705"
     else
         echo -e "ERROR: vaultctl read conditionnal test non existing path \u274c"
+    fi
+    
+    # Restore backup if any
+    if [[ -n "$backup_file" ]]; then
+        mv "$backup_file" "$config_file"
     fi
 }
 
 test_vaultctl_write_errors() {
     local result
     local message
+    local config_file="$HOME/.vaultctl"
+    
+    # Backup and clear config to ensure clean state for error tests
+    local backup_file=""
+    if [[ -f "$config_file" ]]; then
+        backup_file=$(mktemp)
+        cp "$config_file" "$backup_file"
+        rm -f "$config_file"
+    fi
+    unset VAULT_MOUNT
 
     ######## Test missing mount #############################################
     result=$("$VAULTCTL" write "" "$VAULT_PATH" "$VAULT_KEY_1=$VAULT_VALUE_1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    message="❌ Usage: vaultctl write <mount> <path> [<key>=<secret> | <key>=@<secret_file> | @<secret_file>]
+    message="❌ Usage: vaultctl write [<mount>] <path> [<key>=<secret> | <key>=@<secret_file> | @<secret_file>]
 
+NOTE: If mount is not specified, VAULT_MOUNT environment variable or config will be used
 NOTE: path is the full path to the secret without the field name
 
 Examples:
+  vaultctl config VAULT_MOUNT=users  # Set default mount
+  vaultctl write myuser/cbi username=john password=secret123  # Uses default mount
   vaultctl write users myuser/cbi username=john password=secret123
   vaultctl write users myuser/cbi token=@token.txt
   vaultctl write users myuser/cbi @secrets.json"
     assert_equals "${message}" "${result}" "vaultctl write with missing mount"
 
     ######## Test missing path #############################################
-    result=$("$VAULTCTL" write "$VAULT_MOUNT" "" "$VAULT_KEY_1=$VAULT_VALUE_1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    message="❌ Usage: vaultctl write <mount> <path> [<key>=<secret> | <key>=@<secret_file> | @<secret_file>]
+    result=$("$VAULTCTL" write "test" "" "$VAULT_KEY_1=$VAULT_VALUE_1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    message="❌ Usage: vaultctl write [<mount>] <path> [<key>=<secret> | <key>=@<secret_file> | @<secret_file>]
 
+NOTE: If mount is not specified, VAULT_MOUNT environment variable or config will be used
 NOTE: path is the full path to the secret without the field name
 
 Examples:
+  vaultctl config VAULT_MOUNT=users  # Set default mount
+  vaultctl write myuser/cbi username=john password=secret123  # Uses default mount
   vaultctl write users myuser/cbi username=john password=secret123
   vaultctl write users myuser/cbi token=@token.txt
   vaultctl write users myuser/cbi @secrets.json"
     assert_equals "${message}" "${result}" "vaultctl write with missing path"
 
     ######## Test missing fields #############################################
-    result=$("$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    message="❌ Usage: vaultctl write <mount> <path> [<key>=<secret> | <key>=@<secret_file> | @<secret_file>]
+    result=$("$VAULTCTL" write "test" "$VAULT_PATH" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    message="❌ Usage: vaultctl write [<mount>] <path> [<key>=<secret> | <key>=@<secret_file> | @<secret_file>]
 
+NOTE: If mount is not specified, VAULT_MOUNT environment variable or config will be used
 NOTE: path is the full path to the secret without the field name
 
 Examples:
+  vaultctl config VAULT_MOUNT=users  # Set default mount
+  vaultctl write myuser/cbi username=john password=secret123  # Uses default mount
   vaultctl write users myuser/cbi username=john password=secret123
   vaultctl write users myuser/cbi token=@token.txt
   vaultctl write users myuser/cbi @secrets.json"
     assert_equals "${message}" "${result}" "vaultctl write with missing fields"
 
     ######## Test missing value in fields #############################################"
-    result=$("$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "$VAULT_KEY_1=$VAULT_VALUE_1 $VAULT_KEY_2=" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    result=$("$VAULTCTL" write "test" "$VAULT_PATH" "$VAULT_KEY_1=$VAULT_VALUE_1 $VAULT_KEY_2=" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     message="❌ Field key '$VAULT_KEY_2' or value '' is empty"
     assert_equals "${message}" "${result}" "vaultctl write with missing value in fields"
 
     ######## Test missing value in fields with only key ref #############################################"
-    result=$("$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "$VAULT_KEY_1=$VAULT_VALUE_1 $VAULT_KEY_2" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    result=$("$VAULTCTL" write "test" "$VAULT_PATH" "$VAULT_KEY_1=$VAULT_VALUE_1 $VAULT_KEY_2" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     message="❌ Field key '$VAULT_KEY_2' or value '' is empty"
     assert_equals "${message}" "${result}" "vaultctl write with missing value in fields with only key ref"
 
     ######## Test missing file for write #############################################"
-    result=$("$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "$VAULT_KEY_1=@test.json" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    result=$("$VAULTCTL" write "test" "$VAULT_PATH" "$VAULT_KEY_1=@test.json" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     message="❌ File with secrets not found: test.json"
     assert_equals "${message}" "${result}" "vaultctl write with missing file"
 
     ######## Test missing file without key for write #############################################"
-    result=$("$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "@test.json" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    result=$("$VAULTCTL" write "test" "$VAULT_PATH" "@test.json" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     message="❌ File with secrets not found: test.json"
     assert_equals "${message}" "${result}" "vaultctl write with missing file without key "
     
     ######## Test empty file for write #############################################"
-    result=$("$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "$VAULT_KEY_1=@${VAULT_EMPTY_FILE_PATH}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    result=$("$VAULTCTL" write "test" "$VAULT_PATH" "$VAULT_KEY_1=@${VAULT_EMPTY_FILE_PATH}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     message="❌ Secrets file is empty: ${VAULT_EMPTY_FILE_PATH}"
     assert_equals "${message}" "${result}" "vaultctl write with empty file"
 
     ######## Test empty file without key for write #############################################"
-    result=$("$VAULTCTL" write "$VAULT_MOUNT" "$VAULT_PATH" "@${VAULT_EMPTY_FILE_PATH}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    result=$("$VAULTCTL" write "test" "$VAULT_PATH" "@${VAULT_EMPTY_FILE_PATH}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     message="❌ Secrets file is empty: ${VAULT_EMPTY_FILE_PATH}"
     assert_equals "${message}" "${result}" "vaultctl write with empty file without key"
+    
+    # Restore backup if any
+    if [[ -n "$backup_file" ]]; then
+        mv "$backup_file" "$config_file"
+    fi
+}
+
+# Test config command
+test_vaultctl_config() {
+    local result
+    local config_file="$HOME/.vaultctl"
+    
+    # Backup existing config if any
+    local backup_file=""
+    if [[ -f "$config_file" ]]; then
+        backup_file=$(mktemp)
+        cp "$config_file" "$backup_file"
+    fi
+    
+    # Ensure clean state
+    rm -f "$config_file"
+    unset VAULT_MOUNT
+    
+    ######## Test config without arguments (show config) #############################################
+    result=$("$VAULTCTL" config 2>&1 | grep -c "Current configuration:" || true)
+    if [[ "$result" -gt 0 ]]; then
+        echo -e "INFO: vaultctl config show without file \u2705"
+    else
+        echo -e "ERROR: vaultctl config show without file \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+    
+    ######## Test setting VAULT_MOUNT #############################################
+    result=$("$VAULTCTL" config VAULT_MOUNT=test_mount 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Configuration updated: VAULT_MOUNT=test_mount"* ]]; then
+        echo -e "INFO: vaultctl config set VAULT_MOUNT \u2705"
+    else
+        echo -e "ERROR: vaultctl config set VAULT_MOUNT \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+    
+    # Verify config was written
+    if [[ -f "$config_file" ]] && grep -q "VAULT_MOUNT=test_mount" "$config_file"; then
+        echo -e "INFO: vaultctl config file written correctly \u2705"
+    else
+        echo -e "ERROR: vaultctl config file not written \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+    
+    ######## Test invalid config key #############################################
+    result=$("$VAULTCTL" config INVALID_KEY=value 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Unknown configuration key: INVALID_KEY"* ]]; then
+        echo -e "INFO: vaultctl config reject invalid key \u2705"
+    else
+        echo -e "ERROR: vaultctl config should reject invalid key \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+    
+    ######## Test empty value #############################################
+    result=$("$VAULTCTL" config VAULT_MOUNT= 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"VAULT_MOUNT value cannot be empty"* ]]; then
+        echo -e "INFO: vaultctl config reject empty value \u2705"
+    else
+        echo -e "ERROR: vaultctl config should reject empty value \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+    
+    # Restore backup if any
+    if [[ -n "$backup_file" ]]; then
+        mv "$backup_file" "$config_file"
+    else
+        rm -f "$config_file"
+    fi
+    unset VAULT_MOUNT
+}
+
+# Test read with default mount
+test_vaultctl_read_default_mount() {
+    local result
+    local config_file="$HOME/.vaultctl"
+    
+    # Backup existing config
+    local backup_file=""
+    if [[ -f "$config_file" ]]; then
+        backup_file=$(mktemp)
+        cp "$config_file" "$config_file.backup"
+    fi
+    
+    # Setup config with VAULT_MOUNT
+    local mount_value="test"
+    echo "VAULT_MOUNT=$mount_value" > "$config_file"
+    
+    # Cleanup before test
+    cleanup_vault "$mount_value" "$VAULT_PATH"
+    
+    ######## Test write then read with default mount #############################################
+    # First write with explicit mount
+    "$VAULTCTL" write "$mount_value" "$VAULT_PATH" "$VAULT_KEY_1=$VAULT_VALUE_1" > /dev/null 2>&1
+    
+    # Read with only path (should use default mount from config)
+    result=$("$VAULTCTL" read "$VAULT_PATH/$VAULT_KEY_1" 2>&1 | grep -v "^[[:space:]]*$" | sed 's/\x1b\[[0-9;]*m//g' || true)
+    assert_equals "$VAULT_VALUE_1" "$result" "vaultctl read with default mount from config"
+    
+    ######## Test read with VAULT_MOUNT env var #############################################
+    export VAULT_MOUNT="$mount_value"
+    rm -f "$config_file"
+    
+    result=$("$VAULTCTL" read "$VAULT_PATH/$VAULT_KEY_1" 2>&1 | grep -v "^[[:space:]]*$" | sed 's/\x1b\[[0-9;]*m//g' || true)
+    assert_equals "$VAULT_VALUE_1" "$result" "vaultctl read with default mount from env var"
+    
+    unset VAULT_MOUNT
+    
+    ######## Test read without mount and no config should fail #############################################
+    result=$("$VAULTCTL" read "$VAULT_PATH/$VAULT_KEY_1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"If mount is not specified, VAULT_MOUNT environment variable or config will be used"* ]]; then
+        echo -e "INFO: vaultctl read fails without mount or config \u2705"
+    else
+        echo -e "ERROR: vaultctl read should fail without mount or config \u274c"
+        [[ -f "$config_file.backup" ]] && mv "$config_file.backup" "$config_file"
+        exit 1
+    fi
+    
+    # Cleanup
+    cleanup_vault "$mount_value" "$VAULT_PATH"
+    
+    # Restore backup
+    if [[ -f "$config_file.backup" ]]; then
+        mv "$config_file.backup" "$config_file"
+    fi
+}
+
+# Test write with default mount
+test_vaultctl_write_default_mount() {
+    local result
+    local config_file="$HOME/.vaultctl"
+    
+    # Backup existing config
+    local backup_file=""
+    if [[ -f "$config_file" ]]; then
+        backup_file=$(mktemp)
+        cp "$config_file" "$backup_file"
+    fi
+    
+    # Setup config with VAULT_MOUNT
+    local mount_value="test"
+    echo "VAULT_MOUNT=$mount_value" > "$config_file"
+    
+    # Cleanup before test
+    cleanup_vault "$mount_value" "$VAULT_PATH"
+    
+    ######## Test write with default mount from config #############################################
+    "$VAULTCTL" write "$VAULT_PATH" "$VAULT_KEY_1=$VAULT_VALUE_1" > /dev/null 2>&1
+    
+    # Verify with explicit mount
+    result=$("$VAULTCTL" read "$mount_value" "$VAULT_PATH/$VAULT_KEY_1" 2>&1 | grep -v "^[[:space:]]*$" | sed 's/\x1b\[[0-9;]*m//g' || true)
+    assert_equals "$VAULT_VALUE_1" "$result" "vaultctl write with default mount from config"
+    
+    # Cleanup
+    cleanup_vault "$mount_value" "$VAULT_PATH"
+    
+    # Restore backup
+    if [[ -n "$backup_file" ]]; then
+        mv "$backup_file" "$config_file"
+    else
+        rm -f "$config_file"
+    fi
 }
 
 # Run tests
@@ -328,5 +540,11 @@ echo -e "\nFailure tests for vaultctl read...\n"
 test_vaultctl_read_errors
 echo -e "\nFailure tests for vaultctl write....\n"
 test_vaultctl_write_errors
+echo -e "\nTests for vaultctl config...\n"
+test_vaultctl_config
+echo -e "\nTests for vaultctl read with default mount...\n"
+test_vaultctl_read_default_mount
+echo -e "\nTests for vaultctl write with default mount...\n"
+test_vaultctl_write_default_mount
 
 echo -e "\nAll tests passed! \u2705"

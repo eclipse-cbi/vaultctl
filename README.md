@@ -119,13 +119,14 @@ vaultctl logout
 - **`VAULT_ADDR`** - Vault server address (default: `https://secretsmanager.eclipse.org`)
 - **`VAULT_TOKEN`** - Vault authentication token
 - **`VAULT_USERNAME`** - Your LDAP username (saved after first login)
+- **`VAULT_MOUNT`** - Default mount point for read/write operations (optional)
 - **`VAULT_CACHE_TTL`** - Cache time-to-live in seconds (default: `86400` = 1 day)
 - **`VAULT_PARALLEL`** - Number of parallel scan workers (default: `5`)
 
 ### Configuration Files
 
 - **`~/.vault-token`** - Stores your authentication token
-- **`~/.vaultctl`** - Stores your username (created after first login)
+- **`~/.vaultctl`** - Stores configuration (username, VAULT_MOUNT, etc.)
 - **`~/.vaultctl_cache/`** - Directory for cached secret indexes
 
 ## Commands
@@ -161,6 +162,24 @@ Export Vault environment variables for use in current shell.
 eval $(vaultctl export-vault)
 ```
 
+#### `config`
+Manage vaultctl configuration settings.
+
+```bash
+# Show current configuration
+vaultctl config
+
+# Set default mount point
+vaultctl config VAULT_MOUNT=cbi
+
+# Now you can use commands without specifying mount
+vaultctl read technology.cbi/github.com/api-token
+vaultctl write myproject/secrets key=value
+```
+
+**Supported Configuration Keys:**
+- `VAULT_MOUNT` - Default mount point for read/write operations
+
 ---
 
 ### Operations
@@ -169,8 +188,11 @@ eval $(vaultctl export-vault)
 Read a secret or list keys in a secret path.
 
 ```bash
-# Read a specific field
+# With explicit mount
 vaultctl read <mount> <path/to/secret/field>
+
+# With default mount (set via config or VAULT_MOUNT env var)
+vaultctl read <path/to/secret/field>
 
 # List keys in a secret
 vaultctl read <mount> <path/to/secret>
@@ -182,6 +204,13 @@ vaultctl read <mount> <path/to/secret>
 
 **Examples:**
 ```bash
+# Set default mount
+vaultctl config VAULT_MOUNT=users
+
+# Use without mount
+vaultctl read myuser/cbi/JENKINS_USERNAME
+
+# Or specify mount explicitly
 vaultctl read users myuser/cbi/JENKINS_USERNAME
 vaultctl read cbi technology.cbi/github.com/api-token
 vaultctl read users myuser  # List all keys
@@ -192,7 +221,11 @@ vaultctl read -v cbi technology.cbi/repo  # Verbose mode
 Write or update a secret.
 
 ```bash
+# With explicit mount
 vaultctl write <mount> <path> <key>=<value> [<key2>=<value2> ...]
+
+# With default mount (set via config or VAULT_MOUNT env var)
+vaultctl write <path> <key>=<value> [<key2>=<value2> ...]
 
 # Write from file
 vaultctl write <mount> <path> <key>=@file.txt

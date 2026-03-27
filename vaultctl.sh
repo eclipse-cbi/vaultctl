@@ -59,6 +59,86 @@ check_vault_cli() {
     return 0
 }
 
+# Load configuration from file
+load_config() {
+    # Initialize VAULT_MOUNT from environment or config file
+    if [[ -z "${VAULT_MOUNT:-}" ]]; then
+        if [[ -f "$CONFIG_FILE" ]]; then
+            # Source the config file safely
+            while IFS='=' read -r key value; do
+                # Skip comments and empty lines
+                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+                # Remove quotes from value
+                value="${value%\"}"
+                value="${value#\"}"
+                value="${value%\'}"
+                value="${value#\'}"
+                
+                if [[ "$key" == "VAULT_MOUNT" ]]; then
+                    export VAULT_MOUNT="$value"
+                fi
+            done < "$CONFIG_FILE"
+        fi
+    fi
+}
+
+# Save configuration to file
+save_config() {
+    local key="$1"
+    local value="$2"
+    
+    # Create or update config file
+    local temp_file=$(mktemp)
+    local found=false
+    
+    if [[ -f "$CONFIG_FILE" ]]; then
+        while IFS='=' read -r current_key current_value; do
+            if [[ "$current_key" == "$key" ]]; then
+                echo "${key}=${value}" >> "$temp_file"
+                found=true
+            else
+                echo "${current_key}=${current_value}" >> "$temp_file"
+            fi
+        done < "$CONFIG_FILE"
+    fi
+    
+    # If key wasn't found, append it
+    if [[ "$found" == false ]]; then
+        echo "${key}=${value}" >> "$temp_file"
+    fi
+    
+    mv "$temp_file" "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+    
+    return 0
+}
+
+# Get config value
+get_config() {
+    local key="$1"
+    local default="${2:-}"
+    
+    if [[ -f "$CONFIG_FILE" ]]; then
+        while IFS='=' read -r current_key value; do
+            # Skip comments and empty lines
+            [[ "$current_key" =~ ^#.*$ || -z "$current_key" ]] && continue
+            
+            if [[ "$current_key" == "$key" ]]; then
+                # Remove quotes from value
+                value="${value%\"}"
+                value="${value#\"}"
+                value="${value%\'}"
+                value="${value#\'}"
+                echo "$value"
+                return 0
+            fi
+        done < "$CONFIG_FILE"
+    fi
+    
+    echo "$default"
+    return 0
+}
+
 
 # Load token from file
 load_token_from_file() {
@@ -210,6 +290,65 @@ cmd_login() {
 
     export VAULT_TOKEN
     export VAULT_USERNAME
+    return 0
+}
+
+# Command: config - Manage configuration
+cmd_config() {
+    local show_config=false
+    
+    # If no arguments, show current config
+    if [[ $# -eq 0 ]]; then
+        show_config=true
+    fi
+    
+    # Parse arguments
+    for arg in "$@"; do
+        if [[ "$arg" == *"="* ]]; then
+            local key="${arg%%=*}"
+            local value="${arg#*=}"
+            
+            case "$key" in
+                VAULT_MOUNT)
+                    if [[ -z "$value" ]]; then
+                        log_error "VAULT_MOUNT value cannot be empty"
+                        return 1
+                    fi
+                    save_config "$key" "$value"
+                    export VAULT_MOUNT="$value"
+                    log_success "Configuration updated: $key=$value"
+                    log_info "Configuration saved to: $CONFIG_FILE"
+                    ;;
+                *)
+                    log_error "Unknown configuration key: $key"
+                    log_info "Supported keys: VAULT_MOUNT"
+                    return 1
+                    ;;
+            esac
+        else
+            log_error "Invalid format. Use: vaultctl config <KEY>=<value>"
+            return 1
+        fi
+    done
+    
+    # Show current configuration
+    if [[ "$show_config" == true ]]; then
+        # Load config to display current values
+        load_config
+        
+        log_info "Current configuration:"
+        echo ""
+        if [[ -f "$CONFIG_FILE" ]]; then
+            cat "$CONFIG_FILE"
+        else
+            echo "No configuration file found at: $CONFIG_FILE"
+        fi
+        echo ""
+        log_info "Environment variables:"
+        echo "  VAULT_ADDR=${VAULT_ADDR:-<not set>}"
+        echo "  VAULT_MOUNT=${VAULT_MOUNT:-<not set>}"
+    fi
+    
     return 0
 }
 
@@ -657,7 +796,6 @@ _process_user_secrets() {
         full_path="$user_path/$subpath"
     fi
     
-    log_info "Using mount: users" >&2
     log_info "Using path: $full_path" >&2
     
     # Process each mapping
@@ -800,7 +938,6 @@ cmd_export_users_all() {
     # Extract first part of email (before @)
     local user_path="${VAULT_USERNAME%%@*}"
     
-    log_info "Using mount: users" >&2
     log_info "Using path: $user_path" >&2
     
     # Export all secrets from user path
@@ -840,7 +977,6 @@ cmd_export_users_path_all() {
     local user_path="${VAULT_USERNAME%%@*}"
     local full_path="$user_path/$subpath"
     
-    log_info "Using mount: users" >&2
     log_info "Using path: $full_path" >&2
     
     # Export all secrets from subpath
@@ -859,11 +995,31 @@ cmd_export_users_cbi_all() {
     local user_path="${VAULT_USERNAME%%@*}"
     local full_path="$user_path/cbi"
     
-    log_info "Using mount: users" >&2
     log_info "Using path: $full_path" >&2
     
     # Export all secrets from cbi subpath
     _export_all_secrets "users" "$full_path" "$@"
+}
+
+# Show usage for read command
+_show_read_usage() {
+    log_error "Usage: vaultctl read [-b] [-v] [<mount>] <path>"
+    echo ""
+    echo "NOTE: If mount is not specified, VAULT_MOUNT environment variable or config will be used"
+    echo "NOTE: path can be either a secret name (to list keys) or secret/field"
+    echo ""
+    echo "Options:"
+    echo "  -b, --batch    Silent mode: suppress all messages, only return exit code"
+    echo "  -v, --verbose  Verbose mode: display vault commands being executed"
+    echo ""
+    echo "Examples:"
+    echo "  vaultctl config VAULT_MOUNT=cbi  # Set default mount"
+    echo "  vaultctl read technology.cbi/github.com/api-token  # Uses default mount"
+    echo "  vaultctl read cbi technology.cbi  # List keys in secret 'technology.cbi'"
+    echo "  vaultctl read users <username>/cbi/JENKINS_USERNAME"
+    echo "  vaultctl read cbi technology.cbi/github.com/api-token"
+    echo "  vaultctl read -b cbi technology.cbi/github.com/api-token && echo ok"
+    echo "  vaultctl read -v cbi technology.cbi/github.com/api-token"
 }
 
 # Command: read
@@ -902,22 +1058,25 @@ cmd_read() {
         esac
     done
 
+    # If only one argument, use it as path and try to get mount from VAULT_MOUNT
+    if [[ -n "$mount" && -z "$path" ]]; then
+        # Load config to get VAULT_MOUNT if not set
+        load_config
+        
+        if [[ -n "${VAULT_MOUNT:-}" ]]; then
+            path="$mount"
+            mount="$VAULT_MOUNT"
+        else
+            if [[ "$batch" != true ]]; then
+                _show_read_usage
+            fi
+            return 1
+        fi
+    fi
+
     if [[ -z "$mount" || -z "$path" ]]; then
         if [[ "$batch" != true ]]; then
-            log_error "Usage: vaultctl read [-b] [-v] <mount> <path>"
-            echo ""
-            echo "NOTE: path can be either a secret name (to list keys) or secret/field"
-            echo ""
-            echo "Options:"
-            echo "  -b, --batch    Silent mode: suppress all messages, only return exit code"
-            echo "  -v, --verbose  Verbose mode: display vault commands being executed"
-            echo ""
-            echo "Examples:"
-            echo "  vaultctl read cbi technology.cbi # List keys in secret 'technology.cbi'"
-            echo "  vaultctl read users <username>/cbi/JENKINS_USERNAME"
-            echo "  vaultctl read cbi technology.cbi/github.com/api-token"
-            echo "  vaultctl read -b cbi technology.cbi/github.com/api-token && echo ok"
-            echo "  vaultctl read -v cbi technology.cbi/github.com/api-token"
+            _show_read_usage
         fi
         return 1
     fi
@@ -1050,15 +1209,46 @@ cmd_read() {
 cmd_write() {
     local mount="${1:-}"
     local path="${2:-}"
-    shift 2
+    shift 2 2>/dev/null || true
     local fields=("$@")
     
+    # Check if we need to use VAULT_MOUNT
+    # If path is empty but we have fields, then mount is actually the path
+    if [[ -n "$mount" && -z "$path" && ${#fields[@]} -eq 0 ]]; then
+        # Only one argument provided, can't proceed
+        :  # Fall through to error below
+    elif [[ -n "$mount" && -n "$path" && ${#fields[@]} -eq 0 ]]; then
+        # Two arguments: could be "mount path" (missing fields) or "path fields" (missing mount)
+        # Check if the second argument looks like a field (contains =)
+        if [[ "$path" == *=* || "$path" == @* ]]; then
+            # mount is actually path, path is actually a field
+            fields=("$path")
+            path="$mount"
+            mount=""
+            
+            # Try to load VAULT_MOUNT
+            load_config
+            if [[ -n "${VAULT_MOUNT:-}" ]]; then
+                mount="$VAULT_MOUNT"
+            fi
+        fi
+    elif [[ -z "$mount" ]]; then
+        # No arguments at all
+        :  # Fall through to error
+    elif [[ -z "$path" ]]; then
+        # Only mount provided, no path
+        :  # Fall through to error  
+    fi
+    
     if [[ -z "$mount" || -z "$path" || ${#fields[@]} -eq 0 ]]; then
-        log_error "Usage: vaultctl write <mount> <path> [<key>=<secret> | <key>=@<secret_file> | @<secret_file>]"
+        log_error "Usage: vaultctl write [<mount>] <path> [<key>=<secret> | <key>=@<secret_file> | @<secret_file>]"
         echo ""
+        echo "NOTE: If mount is not specified, VAULT_MOUNT environment variable or config will be used"
         echo "NOTE: path is the full path to the secret without the field name"
         echo ""
         echo "Examples:"
+        echo "  vaultctl config VAULT_MOUNT=users  # Set default mount"
+        echo "  vaultctl write myuser/cbi username=john password=secret123  # Uses default mount"
         echo "  vaultctl write users myuser/cbi username=john password=secret123"
         echo "  vaultctl write users myuser/cbi token=@token.txt"
         echo "  vaultctl write users myuser/cbi @secrets.json"
@@ -1393,11 +1583,17 @@ cmd_export_vault() {
     # Load username if available (silently)
     load_username_from_config &>/dev/null || true
     
+    # Load config to get VAULT_MOUNT if available (silently)
+    load_config &>/dev/null || true
+    
     # Output ONLY export commands (no log messages)
     echo "export VAULT_ADDR='$VAULT_ADDR'"
     echo "export VAULT_TOKEN='$VAULT_TOKEN'"
     if [[ -n "${VAULT_USERNAME:-}" ]]; then
         echo "export VAULT_USERNAME='$VAULT_USERNAME'"
+    fi
+    if [[ -n "${VAULT_MOUNT:-}" ]]; then
+        echo "export VAULT_MOUNT='$VAULT_MOUNT'"
     fi
     return 0
 }
@@ -1985,20 +2181,29 @@ Commands:
   status
       Show current authentication status
       
+  config [<KEY>=<value>]
+      Manage vaultctl configuration
+      Usage: vaultctl config                    # Show current config
+             vaultctl config VAULT_MOUNT=cbi   # Set default mount
+      Supported keys: VAULT_MOUNT
+      
   export-vault
       Export vault environment variables for current shell
       Usage: vaultctl export-vault
       
-  read <mount> <path> [-b]
+  read [<mount>] <path> [-b] [-v]
       Read a secret field from Vault
-      Usage: vaultctl read [-b] <mount> <path>
-      Note: path is the full path to the secret, including the field name
+      Usage: vaultctl read [-b] [-v] [<mount>] <path>
+      Note: If mount is not specified, VAULT_MOUNT environment variable or config will be used
+      Note: path can be either a secret name (to list keys) or secret/field
       Options:
-        -b, --batch   Silent mode: suppress all messages, only return exit code
+        -b, --batch    Silent mode: suppress all messages, only return exit code
+        -v, --verbose  Verbose mode: display vault commands being executed
       
-  write <mount> <path> <key>=<value> [...]
+  write [<mount>] <path> <key>=<value> [...]
       Write secrets to Vault
-      Usage: vaultctl write <mount> <path> [<key>=<secret> | <key>=@<secret_file> | @<secret_file>]
+      Usage: vaultctl write [<mount>] <path> [<key>=<secret> | <key>=@<secret_file> | @<secret_file>]
+      Note: If mount is not specified, VAULT_MOUNT environment variable or config will be used
       Note: path is the full path to the secret without the field name
       
   find <mount> [pattern] [options]
@@ -2140,6 +2345,11 @@ main() {
             ;;
         status)
             cmd_status
+            exit $?
+            ;;
+        config)
+            shift
+            cmd_config "$@"
             exit $?
             ;;
         export-vault)
