@@ -2076,7 +2076,7 @@ cmd_find() {
         echo "  vaultctl find users 'myuser/*'          # Paths for a specific user"
         echo "  vaultctl find users --clear-cache       # Clear cached index for users"
         echo "  vaultctl find --clear-all-cache         # Clear all caches"
-        echo "  vaultctl find users --cache-info        # Show cache status for users"
+        echo "  vaultctl find users --cache-info        # Show cache status for users mount"
         echo "  vaultctl find --cache-info              # Show status of all caches"
         return 1
     fi
@@ -2214,6 +2214,30 @@ cmd_find() {
     return 0
 }
 
+# Command: renew
+cmd_renew() {
+    local increment="2h"
+    if [[ $# -ge 1 ]]; then
+        increment="$1"
+    fi
+    check_vault_cli
+    if ! load_token_from_file; then
+        log_error "No valid token found. Please login first."
+        return 1
+    fi
+    log_info "Renewing Vault token for $increment..."
+    local output
+    if ! output=$(vault token renew -format=json -increment="$increment" 2>&1); then
+        log_error "Failed to renew token: $output"
+        return 1
+    fi
+    # Get the new expire_time from vault token lookup (same as status)
+    local expire_time
+    expire_time=$(vault token lookup 2>/dev/null | grep -E '^expire_time' | awk '{print $2}')
+    log_success "Token renewed. New expire_time: ${expire_time:-unknown}"
+    return 0
+}
+
 # Show help
 show_help() {
     cat << EOF
@@ -2267,8 +2291,8 @@ Commands:
         --no-cache-write    Scan live without updating the cache
         -b, --bare          Output raw paths only (no progress, no log messages)
         --clear-cache       Clear cached index for this mount and exit
-        --clear-all-cache   Clear all mount caches (mount not required)
-        --cache-info        Show cache status for this mount (or all)
+        --clear-all-cache   Clear all mount caches and exit (mount not required)
+        --cache-info        Show cache status for this mount (or all if no mount)
         --cache-ttl <s>     Override cache TTL in seconds (default: 3600)
         --parallel <n>      Number of parallel scan workers (default: ${VAULT_PARALLEL})
       
@@ -2293,7 +2317,7 @@ Commands:
       
   export-users <ENV_VAR[:key]> [<ENV_VAR2[:key2]> ...]
       Export specific secrets from users/<username>
-      Usage: vaultctl export-users <ENV_VAR[:key]> [<ENV_VAR2[:key2]> ...]
+      Usage: vaultctl export-users <ENV_VAR[:key]> [<ENV_VAR2:key2> ...]
       
   export-users-all
       Export ALL secrets from users/<username>
@@ -2301,7 +2325,7 @@ Commands:
       
   export-users-path <subpath> <ENV_VAR[:key]> [<ENV_VAR2[:key2]> ...]
       Export specific secrets from users/<username>/<subpath>
-      Usage: vaultctl export-users-path <subpath> <ENV_VAR[:key]> [<ENV_VAR2[:key2]> ...]
+      Usage: vaultctl export-users-path <subpath> <ENV_VAR[:key]> [<ENV_VAR2:key2> ...]
       
   export-users-path-all <subpath>
       Export ALL secrets from users/<username>/<subpath>
@@ -2309,11 +2333,17 @@ Commands:
       
   export-users-cbi <ENV_VAR[:key]> [<ENV_VAR2[:key2]> ...]
       Export specific secrets from users/<username>/cbi
-      Usage: vaultctl export-users-cbi <ENV_VAR[:key]> [<ENV_VAR2[:key2]> ...]
+      Usage: vaultctl export-users-cbi <ENV_VAR[:key]> [<ENV_VAR2:key2> ...]
       
   export-users-cbi-all
       Export ALL secrets from users/<username>/cbi
       Usage: vaultctl export-users-cbi-all
+      
+  renew [increment]
+      Renew the Vault token
+      Usage: vaultctl renew [increment]
+      Options:
+        increment  - Optional increment value (default: 2h)
       
   help
       Show this help message
@@ -2469,6 +2499,11 @@ main() {
         export-users-cbi-all)
             shift
             cmd_export_users_cbi_all "$@"
+            exit $?
+            ;;
+        renew)
+            shift
+            cmd_renew "$@"
             exit $?
             ;;
         help|--help|-h)

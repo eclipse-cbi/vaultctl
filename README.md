@@ -25,6 +25,7 @@
       - [`read`](#read)
       - [`write`](#write)
       - [`mv`](#mv)
+      - [`renew`](#renew)
       - [`rm` / `delete`](#rm--delete)
     - [Find](#find)
     - [Environment Variable Export](#environment-variable-export)
@@ -247,6 +248,7 @@ vaultctl write users myuser/github token=@github_token.txt
 vaultctl write cbi technology.cbi/new-secret @credentials.json
 ```
 
+
 #### `mv`
 Move (rename) a secret path.
 
@@ -258,6 +260,22 @@ vaultctl mv <mount> <source-path> <destination-path>
 ```bash
 vaultctl mv cbi technology.cbi/old-repo technology.cbi/new-repo
 vaultctl mv users myuser/old-dir myuser/new-dir
+```
+
+#### `renew`
+Renew the Vault token to extend its validity.
+
+```bash
+vaultctl renew [increment]
+# increment: Optional duration (e.g., 2h, 30m, 1d). Default is 2h.
+```
+
+**Examples:**
+```bash
+# Renew token for 2 hours (default)
+vaultctl renew
+# Renew token for 4 hours
+vaultctl renew 4h
 ```
 
 #### `rm` / `delete`
