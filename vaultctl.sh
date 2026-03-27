@@ -1001,15 +1001,43 @@ cmd_export_users_cbi_all() {
     _export_all_secrets "users" "$full_path" "$@"
 }
 
+# Helper function to copy text to clipboard
+_copy_to_clipboard() {
+    local data="$1"
+    
+    # Detect OS and use appropriate clipboard command
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS
+        echo -n "$data" | pbcopy
+        return $?
+    elif [[ "$(uname)" == "Linux" ]]; then
+        # Linux - try xclip first, then xsel
+        if command -v xclip &> /dev/null; then
+            echo -n "$data" | xclip -selection clipboard
+            return $?
+        elif command -v xsel &> /dev/null; then
+            echo -n "$data" | xsel --clipboard --input
+            return $?
+        else
+            log_error "Clipboard tool not found. Please install 'xclip' or 'xsel'"
+            return 1
+        fi
+    else
+        log_error "Unsupported operating system for clipboard functionality"
+        return 1
+    fi
+}
+
 # Show usage for read command
 _show_read_usage() {
-    log_error "Usage: vaultctl read [-b] [-v] [<mount>] <path>"
+    log_error "Usage: vaultctl read [-b] [-c] [-v] [<mount>] <path>"
     echo ""
     echo "NOTE: If mount is not specified, VAULT_MOUNT environment variable or config will be used"
     echo "NOTE: path can be either a secret name (to list keys) or secret/field"
     echo ""
     echo "Options:"
     echo "  -b, --batch    Silent mode: suppress all messages, only return exit code"
+    echo "  -c, --clip     Copy secret to clipboard instead of displaying it"
     echo "  -v, --verbose  Verbose mode: display vault commands being executed"
     echo ""
     echo "Examples:"
@@ -1019,6 +1047,7 @@ _show_read_usage() {
     echo "  vaultctl read users <username>/cbi/JENKINS_USERNAME"
     echo "  vaultctl read cbi technology.cbi/github.com/api-token"
     echo "  vaultctl read -b cbi technology.cbi/github.com/api-token && echo ok"
+    echo "  vaultctl read -c cbi technology.cbi/github.com/api-token  # Copy to clipboard"
     echo "  vaultctl read -v cbi technology.cbi/github.com/api-token"
 }
 
@@ -1028,12 +1057,17 @@ cmd_read() {
     local path=""
     local batch=false
     local verbose=false
+    local clip=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -b|--batch)
                 batch=true
+                shift
+                ;;
+            -c|--clip)
+                clip=true
                 shift
                 ;;
             -v|--verbose)
@@ -1159,10 +1193,26 @@ cmd_read() {
             return 1
         fi
 
+        # Handle clipboard option
+        if [[ "$clip" == true ]]; then
+            if ! _copy_to_clipboard "$data"; then
+                [[ "$batch" != true ]] && log_error "Failed to copy to clipboard"
+                return 1
+            fi
+            [[ "$batch" != true ]] && log_success "Secret copied to clipboard"
+            return 0
+        fi
+
         echo -n "$data"
         return 0
     else
         # No slash: treat as secret name, list its keys
+        # Clipboard option doesn't make sense when listing keys
+        if [[ "$clip" == true ]]; then
+            [[ "$batch" != true ]] && log_error "Cannot use -c/--clip option when listing keys. Please specify a field (e.g., secret/field)"
+            return 1
+        fi
+        
         vault_secret_path="$path"
         
         if [[ "$verbose" == true ]]; then

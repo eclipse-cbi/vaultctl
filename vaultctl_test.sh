@@ -193,13 +193,14 @@ test_vaultctl_read_errors() {
 
     ######## Test missing mount #############################################
     result=$("$VAULTCTL" read "" "$VAULT_PATH" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    message="❌ Usage: vaultctl read [-b] [-v] [<mount>] <path>
+    message="❌ Usage: vaultctl read [-b] [-c] [-v] [<mount>] <path>
 
 NOTE: If mount is not specified, VAULT_MOUNT environment variable or config will be used
 NOTE: path can be either a secret name (to list keys) or secret/field
 
 Options:
   -b, --batch    Silent mode: suppress all messages, only return exit code
+  -c, --clip     Copy secret to clipboard instead of displaying it
   -v, --verbose  Verbose mode: display vault commands being executed
 
 Examples:
@@ -209,18 +210,20 @@ Examples:
   vaultctl read users <username>/cbi/JENKINS_USERNAME
   vaultctl read cbi technology.cbi/github.com/api-token
   vaultctl read -b cbi technology.cbi/github.com/api-token && echo ok
+  vaultctl read -c cbi technology.cbi/github.com/api-token  # Copy to clipboard
   vaultctl read -v cbi technology.cbi/github.com/api-token"
     assert_equals "${message}" "${result}" "vaultctl read with missing mount"
 
     ######## Test missing path #############################################
     result=$("$VAULTCTL" read "test" "" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
-    message="❌ Usage: vaultctl read [-b] [-v] [<mount>] <path>
+    message="❌ Usage: vaultctl read [-b] [-c] [-v] [<mount>] <path>
 
 NOTE: If mount is not specified, VAULT_MOUNT environment variable or config will be used
 NOTE: path can be either a secret name (to list keys) or secret/field
 
 Options:
   -b, --batch    Silent mode: suppress all messages, only return exit code
+  -c, --clip     Copy secret to clipboard instead of displaying it
   -v, --verbose  Verbose mode: display vault commands being executed
 
 Examples:
@@ -230,6 +233,7 @@ Examples:
   vaultctl read users <username>/cbi/JENKINS_USERNAME
   vaultctl read cbi technology.cbi/github.com/api-token
   vaultctl read -b cbi technology.cbi/github.com/api-token && echo ok
+  vaultctl read -c cbi technology.cbi/github.com/api-token  # Copy to clipboard
   vaultctl read -v cbi technology.cbi/github.com/api-token"
     assert_equals "${message}" "${result}" "vaultctl read with missing path"
 

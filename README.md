@@ -20,6 +20,7 @@
       - [`logout`](#logout)
       - [`status`](#status)
       - [`export-vault`](#export-vault)
+      - [`config`](#config)
     - [Operations](#operations)
       - [`read`](#read)
       - [`write`](#write)
@@ -199,6 +200,7 @@ vaultctl read <mount> <path/to/secret>
 
 # Options:
 #   -b, --batch    Silent mode (exit code only)
+#   -c, --clip     Copy secret to clipboard instead of displaying it
 #   -v, --verbose  Show vault commands being executed
 ```
 
@@ -209,6 +211,10 @@ vaultctl config VAULT_MOUNT=users
 
 # Use without mount
 vaultctl read myuser/cbi/JENKINS_USERNAME
+
+# Copy secret to clipboard (Linux: requires xclip or xsel, macOS: uses pbcopy)
+vaultctl read -c myuser/cbi/JENKINS_USERNAME
+vaultctl read -c cbi technology.cbi/github.com/api-token
 
 # Or specify mount explicitly
 vaultctl read users myuser/cbi/JENKINS_USERNAME
