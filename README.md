@@ -138,12 +138,16 @@ This means you can override config file settings by exporting environment variab
   - Can be set via: environment variable, config file, or uses default
 - **`VAULT_PARALLEL`** - Number of parallel scan workers (default: `5`)
   - Can be set via: environment variable, config file, or uses default
+- **`VAULT_CONFIG_FILE`** - Configuration file location (default: `~/.vaultctl`)
+  - Can be overridden via environment variable to use a custom location
+- **`VAULT_CACHE_DIR`** - Cache directory location (default: `~/.vaultctl_cache`)
+  - Can be overridden via environment variable to use a custom location
 
 ### Configuration Files
 
 - **`~/.vault-token`** - Stores your authentication token
-- **`~/.vaultctl`** - Stores configuration (username, VAULT_MOUNT, etc.)
-- **`~/.vaultctl_cache/`** - Directory for cached secret indexes
+- **`~/.vaultctl`** (or `$VAULT_CONFIG_FILE`) - Stores configuration (username, VAULT_MOUNT, etc.)
+- **`~/.vaultctl_cache/`** (or `$VAULT_CACHE_DIR`) - Directory for cached secret indexes
 
 ## Commands
 

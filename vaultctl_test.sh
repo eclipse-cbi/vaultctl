@@ -19,6 +19,10 @@ SCRIPT_FOLDER="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
 VAULTCTL="${SCRIPT_FOLDER}/vaultctl.sh"
 
+# Use same config file location as vaultctl.sh
+VAULT_CONFIG_FILE="${VAULT_CONFIG_FILE:-$HOME/.vaultctl_test}"
+export VAULT_CONFIG_FILE
+
 # Temporary files array for cleanup
 TEMP_FILES=()
 
@@ -29,6 +33,11 @@ cleanup_temp_files() {
             rm -f "$temp_file"
         fi
     done
+    
+    # Clean up test config file
+    if [[ -f "$VAULT_CONFIG_FILE" ]]; then
+        rm -f "$VAULT_CONFIG_FILE"
+    fi
 }
 
 # Set trap to cleanup temp files on exit
@@ -180,7 +189,7 @@ test_vaultctl_write_read() {
 test_vaultctl_read_errors() {
     local result
     local message
-    local config_file="$HOME/.vaultctl"
+    local config_file="$VAULT_CONFIG_FILE"
     
     # Backup and clear config to ensure clean state for error tests
     local backup_file=""
@@ -278,7 +287,7 @@ Examples:
 test_vaultctl_write_errors() {
     local result
     local message
-    local config_file="$HOME/.vaultctl"
+    local config_file="$VAULT_CONFIG_FILE"
     
     # Backup and clear config to ensure clean state for error tests
     local backup_file=""
@@ -373,7 +382,7 @@ Examples:
 # Test config command
 test_vaultctl_config() {
     local result
-    local config_file="$HOME/.vaultctl"
+    local config_file="$VAULT_CONFIG_FILE"
     
     # Backup existing config if any
     local backup_file=""
@@ -448,7 +457,7 @@ test_vaultctl_config() {
 # Test read with default mount
 test_vaultctl_read_default_mount() {
     local result
-    local config_file="$HOME/.vaultctl"
+    local config_file="$VAULT_CONFIG_FILE"
     
     # Backup existing config
     local backup_file=""
@@ -503,7 +512,7 @@ test_vaultctl_read_default_mount() {
 # Test write with default mount
 test_vaultctl_write_default_mount() {
     local result
-    local config_file="$HOME/.vaultctl"
+    local config_file="$VAULT_CONFIG_FILE"
     
     # Backup existing config
     local backup_file=""

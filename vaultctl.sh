@@ -15,8 +15,23 @@
 # Configuration
 # Default values (can be overridden by config file or environment variables)
 readonly VAULT_TOKEN_FILE="$HOME/.vault-token"
-readonly CONFIG_FILE="$HOME/.vaultctl"
-readonly VAULT_CACHE_DIR="${HOME}/.vaultctl_cache"
+
+# Set VAULT_CONFIG_FILE if not already set
+if [[ -z "${VAULT_CONFIG_FILE:-}" ]]; then
+    VAULT_CONFIG_FILE="$HOME/.vaultctl"
+fi
+readonly VAULT_CONFIG_FILE
+
+# Set VAULT_CACHE_DIR if not already set
+if [[ -z "${VAULT_CACHE_DIR:-}" ]]; then
+    VAULT_CACHE_DIR="$HOME/.vaultctl_cache"
+fi
+readonly VAULT_CACHE_DIR
+
+# Create cache directory if it doesn't exist
+if [[ ! -d "$VAULT_CACHE_DIR" ]]; then
+    mkdir -p "$VAULT_CACHE_DIR" 2>/dev/null || true
+fi
 
 # These will be set by load_config with priority: env -> config -> default
 VAULT_ADDR=""
@@ -66,7 +81,7 @@ load_config() {
     # Priority order for all variables: env -> config -> default
     
     # Load from config file if it exists
-    if [[ -f "$CONFIG_FILE" ]]; then
+    if [[ -f "$VAULT_CONFIG_FILE" ]]; then
         while IFS='=' read -r key value; do
             # Skip comments and empty lines
             [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
@@ -90,7 +105,7 @@ load_config() {
                     fi
                     ;;
             esac
-        done < "$CONFIG_FILE"
+        done < "$VAULT_CONFIG_FILE"
     fi
     
     # Apply defaults if still not set
@@ -104,11 +119,17 @@ save_config() {
     local key="$1"
     local value="$2"
     
+    # Create config file if it doesn't exist
+    if [[ ! -f "$VAULT_CONFIG_FILE" ]]; then
+        touch "$VAULT_CONFIG_FILE" 2>/dev/null || true
+        chmod 600 "$VAULT_CONFIG_FILE" 2>/dev/null || true
+    fi
+    
     # Create or update config file
     local temp_file=$(mktemp)
     local found=false
     
-    if [[ -f "$CONFIG_FILE" ]]; then
+    if [[ -f "$VAULT_CONFIG_FILE" ]]; then
         while IFS='=' read -r current_key current_value; do
             if [[ "$current_key" == "$key" ]]; then
                 echo "${key}=${value}" >> "$temp_file"
@@ -116,7 +137,7 @@ save_config() {
             else
                 echo "${current_key}=${current_value}" >> "$temp_file"
             fi
-        done < "$CONFIG_FILE"
+        done < "$VAULT_CONFIG_FILE"
     fi
     
     # If key wasn't found, append it
@@ -124,8 +145,8 @@ save_config() {
         echo "${key}=${value}" >> "$temp_file"
     fi
     
-    mv "$temp_file" "$CONFIG_FILE"
-    chmod 600 "$CONFIG_FILE"
+    mv "$temp_file" "$VAULT_CONFIG_FILE"
+    chmod 600 "$VAULT_CONFIG_FILE"
     
     return 0
 }
@@ -135,7 +156,7 @@ get_config() {
     local key="$1"
     local default="${2:-}"
     
-    if [[ -f "$CONFIG_FILE" ]]; then
+    if [[ -f "$VAULT_CONFIG_FILE" ]]; then
         while IFS='=' read -r current_key value; do
             # Skip comments and empty lines
             [[ "$current_key" =~ ^#.*$ || -z "$current_key" ]] && continue
@@ -149,7 +170,7 @@ get_config() {
                 echo "$value"
                 return 0
             fi
-        done < "$CONFIG_FILE"
+        done < "$VAULT_CONFIG_FILE"
     fi
     
     echo "$default"
@@ -202,10 +223,10 @@ _is_token_valid() {
 
 # Load username from config
 load_username_from_config() {
-    if [[ -f "$CONFIG_FILE" ]]; then
+    if [[ -f "$VAULT_CONFIG_FILE" ]]; then
         # Safely parse VAULT_USERNAME from config without executing the file
         local line username
-        line="$(grep -m1 '^VAULT_USERNAME=' "$CONFIG_FILE" 2>/dev/null || true)"
+        line="$(grep -m1 '^VAULT_USERNAME=' "$VAULT_CONFIG_FILE" 2>/dev/null || true)"
         if [[ -n "$line" ]]; then
             username="${line#VAULT_USERNAME=}"
             # Remove optional surrounding double quotes
@@ -223,8 +244,8 @@ load_username_from_config() {
 # Save username to config
 save_username_to_config() {
     local username="$1"
-    echo "VAULT_USERNAME=\"$username\"" > "$CONFIG_FILE"
-    chmod 600 "$CONFIG_FILE"
+    echo "VAULT_USERNAME=\"$username\"" > "$VAULT_CONFIG_FILE"
+    chmod 600 "$VAULT_CONFIG_FILE"
     return 0
 }
 
@@ -254,7 +275,7 @@ get_vault_username() {
     read -r save_choice
     if [[ "$save_choice" == "y" || "$save_choice" == "Y" ]]; then
         save_username_to_config "$username"
-        log_success "Username saved to $CONFIG_FILE"
+        log_success "Username saved to $VAULT_CONFIG_FILE"
     fi
     
     return 0
@@ -349,7 +370,7 @@ _update_config_var() {
     fi
     
     log_success "Configuration updated: $key=$value"
-    log_info "Configuration saved to: $CONFIG_FILE"
+    log_info "Configuration saved to: $VAULT_CONFIG_FILE"
     return 0
 }
 
@@ -395,11 +416,12 @@ cmd_config() {
         # Load config to display current values
         load_config
         
-        log_info "Configuration file: $CONFIG_FILE"
+        log_info "Current configuration:"
+        log_info "Configuration file: $VAULT_CONFIG_FILE"
         echo ""
         
-        if [[ -f "$CONFIG_FILE" ]]; then
-            cat "$CONFIG_FILE"
+        if [[ -f "$VAULT_CONFIG_FILE" ]]; then
+            cat "$VAULT_CONFIG_FILE"
             echo ""
         fi
         printf "  %-18s %s\n" "VAULT_ADDR" "${VAULT_ADDR:-(default)}"
@@ -2460,7 +2482,7 @@ Examples:
   vaultctl logout                                       # Log out and revoke token
 
 Configuration:
-  Username saved in: $CONFIG_FILE
+  Username saved in: $VAULT_CONFIG_FILE
   Token stored in:   $VAULT_TOKEN_FILE
 
 EOF
