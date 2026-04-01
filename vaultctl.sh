@@ -13,13 +13,15 @@
 #
 
 # Configuration
-export VAULT_ADDR="${VAULT_ADDR:-https://secretsmanager.eclipse.org}"
-
+# Default values (can be overridden by config file or environment variables)
 readonly VAULT_TOKEN_FILE="$HOME/.vault-token"
 readonly CONFIG_FILE="$HOME/.vaultctl"
 readonly VAULT_CACHE_DIR="${HOME}/.vaultctl_cache"
-VAULT_CACHE_TTL="${VAULT_CACHE_TTL:-86400}" # Cache TTL in seconds (default: 1 day)
-VAULT_PARALLEL="${VAULT_PARALLEL:-5}"      # Number of parallel scan workers
+
+# These will be set by load_config with priority: env -> config -> default
+VAULT_ADDR=""
+VAULT_CACHE_TTL=""
+VAULT_PARALLEL=""
 
 # Colors for output
 readonly RED='\033[0;31m'
@@ -61,25 +63,40 @@ check_vault_cli() {
 
 # Load configuration from file
 load_config() {
-    # Initialize VAULT_MOUNT from environment or config file
-    if [[ -z "${VAULT_MOUNT:-}" ]]; then
-        if [[ -f "$CONFIG_FILE" ]]; then
-            # Source the config file safely
-            while IFS='=' read -r key value; do
-                # Skip comments and empty lines
-                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
-                # Remove quotes from value
-                value="${value%\"}"
-                value="${value#\"}"
-                value="${value%\'}"
-                value="${value#\'}"
-                
-                if [[ "$key" == "VAULT_MOUNT" ]]; then
-                    export VAULT_MOUNT="$value"
-                fi
-            done < "$CONFIG_FILE"
-        fi
+    # Priority order for all variables: env -> config -> default
+    
+    # Load from config file if it exists
+    if [[ -f "$CONFIG_FILE" ]]; then
+        while IFS='=' read -r key value; do
+            # Skip comments and empty lines
+            [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+            # Remove quotes from value
+            value="${value%\"}"
+            value="${value#\"}"
+            value="${value%\'}"
+            value="${value#\'}"
+            
+            # Handle supported configuration keys (only if not already set in env)
+            case "$key" in
+                VAULT_MOUNT|VAULT_ADDR|VAULT_CACHE_TTL|VAULT_PARALLEL)
+                    # Check if variable is already set in environment
+                    if [[ -z "${!key:-}" ]]; then
+                        # Only VAULT_ADDR needs to be exported (used by vault CLI)
+                        if [[ "$key" == "VAULT_ADDR" ]]; then
+                            export "$key=$value"
+                        else
+                            eval "$key=\$value"
+                        fi
+                    fi
+                    ;;
+            esac
+        done < "$CONFIG_FILE"
     fi
+    
+    # Apply defaults if still not set
+    export VAULT_ADDR="${VAULT_ADDR:-https://secretsmanager.eclipse.org}"
+    VAULT_CACHE_TTL="${VAULT_CACHE_TTL:-86400}"  # Default: 1 day
+    VAULT_PARALLEL="${VAULT_PARALLEL:-5}"        # Default: 5 workers
 }
 
 # Save configuration to file
@@ -293,6 +310,49 @@ cmd_login() {
     return 0
 }
 
+# Helper function to update a config variable
+_update_config_var() {
+    local key="$1"
+    local value="$2"
+    local need_export="${3:-false}"
+    
+    # Validate based on key type
+    case "$key" in
+        VAULT_MOUNT|VAULT_ADDR)
+            if [[ -z "$value" ]]; then
+                log_error "$key value cannot be empty"
+                return 1
+            fi
+            ;;
+        VAULT_CACHE_TTL)
+            if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+                log_error "VAULT_CACHE_TTL must be a positive integer (seconds)"
+                return 1
+            fi
+            ;;
+        VAULT_PARALLEL)
+            if [[ ! "$value" =~ ^[0-9]+$ ]] || [[ "$value" -lt 1 ]]; then
+                log_error "VAULT_PARALLEL must be a positive integer"
+                return 1
+            fi
+            ;;
+    esac
+    
+    # Save to config file
+    save_config "$key" "$value"
+    
+    # Set variable (with or without export)
+    if [[ "$need_export" == "true" ]]; then
+        export "$key=$value"
+    else
+        eval "$key=\$value"
+    fi
+    
+    log_success "Configuration updated: $key=$value"
+    log_info "Configuration saved to: $CONFIG_FILE"
+    return 0
+}
+
 # Command: config - Manage configuration
 cmd_config() {
     local show_config=false
@@ -310,18 +370,17 @@ cmd_config() {
             
             case "$key" in
                 VAULT_MOUNT)
-                    if [[ -z "$value" ]]; then
-                        log_error "VAULT_MOUNT value cannot be empty"
-                        return 1
-                    fi
-                    save_config "$key" "$value"
-                    export VAULT_MOUNT="$value"
-                    log_success "Configuration updated: $key=$value"
-                    log_info "Configuration saved to: $CONFIG_FILE"
+                    _update_config_var "$key" "$value" "false" || return 1
+                    ;;
+                VAULT_ADDR)
+                    _update_config_var "$key" "$value" "true" || return 1
+                    ;;
+                VAULT_CACHE_TTL|VAULT_PARALLEL)
+                    _update_config_var "$key" "$value" "false" || return 1
                     ;;
                 *)
                     log_error "Unknown configuration key: $key"
-                    log_info "Supported keys: VAULT_MOUNT"
+                    log_info "Supported keys: VAULT_MOUNT, VAULT_ADDR, VAULT_CACHE_TTL, VAULT_PARALLEL"
                     return 1
                     ;;
             esac
@@ -336,17 +395,17 @@ cmd_config() {
         # Load config to display current values
         load_config
         
-        log_info "Current configuration: $CONFIG_FILE"
+        log_info "Configuration file: $CONFIG_FILE"
         echo ""
+        
         if [[ -f "$CONFIG_FILE" ]]; then
             cat "$CONFIG_FILE"
-        else
-            echo "No configuration file found at: $CONFIG_FILE"
+            echo ""
         fi
-        echo ""
-        log_info "Environment variables:"
-        echo "  VAULT_ADDR=${VAULT_ADDR:-<not set>}"
-        echo "  VAULT_MOUNT=${VAULT_MOUNT:-<not set>}"
+        printf "  %-18s %s\n" "VAULT_ADDR" "${VAULT_ADDR:-(default)}"
+        printf "  %-18s %s\n" "VAULT_MOUNT" "${VAULT_MOUNT:-(not set)}"
+        printf "  %-18s %s\n" "VAULT_CACHE_TTL" "${VAULT_CACHE_TTL:-(default)} seconds"
+        printf "  %-18s %s\n" "VAULT_PARALLEL" "${VAULT_PARALLEL:-(default)} workers"
     fi
     
     return 0
@@ -2411,6 +2470,9 @@ EOF
 # Main function
 main() {
     check_vault_cli
+    
+    # Load configuration (env -> config -> defaults)
+    load_config
     
     local command="${1:-help}"
     

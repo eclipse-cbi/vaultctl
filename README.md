@@ -116,14 +116,28 @@ vaultctl logout
 
 ## Configuration
 
+### Configuration Priority
+
+All configuration variables follow this priority order:
+
+1. **Environment variable** - Values set in your shell (highest priority)
+2. **Configuration file** - Values saved in `~/.vaultctl`
+3. **Default value** - Built-in defaults (lowest priority)
+
+This means you can override config file settings by exporting environment variables, and config file settings override the script defaults.
+
 ### Environment Variables
 
 - **`VAULT_ADDR`** - Vault server address (default: `https://secretsmanager.eclipse.org`)
-- **`VAULT_TOKEN`** - Vault authentication token
+  - Can be set via: environment variable, config file, or uses default
+- **`VAULT_TOKEN`** - Vault authentication token (managed automatically)
 - **`VAULT_USERNAME`** - Your LDAP username (saved after first login)
 - **`VAULT_MOUNT`** - Default mount point for read/write operations (optional)
+  - Can be set via: environment variable, config file, or left unset
 - **`VAULT_CACHE_TTL`** - Cache time-to-live in seconds (default: `86400` = 1 day)
+  - Can be set via: environment variable, config file, or uses default
 - **`VAULT_PARALLEL`** - Number of parallel scan workers (default: `5`)
+  - Can be set via: environment variable, config file, or uses default
 
 ### Configuration Files
 
@@ -174,6 +188,15 @@ vaultctl config
 # Set default mount point
 vaultctl config VAULT_MOUNT=cbi
 
+# Set custom Vault server address
+vaultctl config VAULT_ADDR=https://vault.example.com
+
+# Set cache TTL (in seconds)
+vaultctl config VAULT_CACHE_TTL=3600
+
+# Set number of parallel workers for scanning
+vaultctl config VAULT_PARALLEL=10
+
 # Now you can use commands without specifying mount
 vaultctl read technology.cbi/github.com/api-token
 vaultctl write myproject/secrets key=value
@@ -181,6 +204,9 @@ vaultctl write myproject/secrets key=value
 
 **Supported Configuration Keys:**
 - `VAULT_MOUNT` - Default mount point for read/write operations
+- `VAULT_ADDR` - Vault server address
+- `VAULT_CACHE_TTL` - Cache time-to-live in seconds
+- `VAULT_PARALLEL` - Number of parallel scan workers
 
 ---
 
