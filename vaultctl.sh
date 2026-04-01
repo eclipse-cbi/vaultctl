@@ -336,7 +336,7 @@ cmd_config() {
         # Load config to display current values
         load_config
         
-        log_info "Current configuration:"
+        log_info "Current configuration: $CONFIG_FILE"
         echo ""
         if [[ -f "$CONFIG_FILE" ]]; then
             cat "$CONFIG_FILE"
