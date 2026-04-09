@@ -573,14 +573,14 @@ export_secret_as_env() {
         env_var="${env_var^^}"
     fi
     
-    log_info "Retrieving $env_var from Vault ($mount/$path)..." >&2
+    log_info "Retrieving $key from Vault ($mount/$path)..." >&2
     
     local value
     value=$(get_vault_secret "$mount" "$path" "$key")
     
     if [[ $? -eq 0 ]]; then
         if [[ -z "$value" ]]; then
-            log_warning "Retrieved empty value for $env_var from Vault."
+            log_warning "Retrieved empty value for $key from Vault."
             return 1
         else
             # Output export command for eval with proper escaping
@@ -591,7 +591,7 @@ export_secret_as_env() {
             return 0
         fi
     else
-        log_error "Failed to load $env_var from Vault."
+        log_error "Failed to load $key from Vault."
         return 1
     fi
 }
