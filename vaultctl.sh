@@ -34,9 +34,9 @@ if [[ ! -d "$VAULT_CACHE_DIR" ]]; then
 fi
 
 # These will be set by load_config with priority: env -> config -> default
-VAULT_ADDR=""
-VAULT_CACHE_TTL=""
-VAULT_PARALLEL=""
+VAULT_ADDR="${VAULT_ADDR:-}"
+VAULT_CACHE_TTL="${VAULT_CACHE_TTL:-}"
+VAULT_PARALLEL="${VAULT_PARALLEL:-}"
 
 # Colors for output
 readonly RED='\033[0;31m'
