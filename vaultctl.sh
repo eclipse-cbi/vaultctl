@@ -364,6 +364,7 @@ vault_ldap_login() {
 
 # Command: login
 cmd_login() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help login; return 0; }
     # Check if token is already valid
     if load_token_from_file; then
         log_success "Already authenticated with a valid token"
@@ -447,6 +448,7 @@ _update_config_var() {
 
 # Command: config - Manage configuration
 cmd_config() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help config; return 0; }
     local show_config=false
     local target_profile=""
 
@@ -556,6 +558,7 @@ cmd_config() {
 
 # Command: status
 cmd_status() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help status; return 0; }
     log_info "Profile: $VAULT_CURRENT_PROFILE"
     log_info "VAULT_ADDR: $VAULT_ADDR"
     
@@ -580,6 +583,7 @@ cmd_status() {
 
 # Command: logout
 cmd_logout() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help logout; return 0; }
     local token_to_revoke=""
     
     # Check if VAULT_TOKEN is set in environment
@@ -841,6 +845,7 @@ _export_all_secrets() {
 
 # Command: export-env
 cmd_export_env() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-env; return 0; }
     local mount="${1:-}"
     local path="${2:-}"
     shift 2
@@ -924,6 +929,7 @@ cmd_export_env() {
 
 # Command: export-env-all
 cmd_export_env_all() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-env-all; return 0; }
     local mount="${1:-}"
     local path="${2:-}"
     shift 2
@@ -1036,6 +1042,7 @@ _process_user_secrets() {
 
 # Command: export-users
 cmd_export_users() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users; return 0; }
     local mappings=("${@}")
     
     if [[ ${#mappings[@]} -eq 0 ]]; then
@@ -1072,6 +1079,7 @@ cmd_export_users() {
 
 # Command: export-users-path
 cmd_export_users_path() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users-path; return 0; }
     local subpath="${1:-}"
     local mappings=("${@:2}")
     
@@ -1104,6 +1112,7 @@ cmd_export_users_path() {
 
 # Command: export-users-cbi
 cmd_export_users_cbi() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users-cbi; return 0; }
     local mappings=("${@}")
     
     if [[ ${#mappings[@]} -eq 0 ]]; then
@@ -1132,6 +1141,7 @@ cmd_export_users_cbi() {
 
 # Command: export-users-all
 cmd_export_users_all() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users-all; return 0; }
     # Load username
     if ! load_username_from_config || [[ -z "${VAULT_USERNAME:-}" ]]; then
         log_error "No username configured. Run 'vaultctl login' first."
@@ -1149,6 +1159,7 @@ cmd_export_users_all() {
 
 # Command: export-users-path-all
 cmd_export_users_path_all() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users-path-all; return 0; }
     local subpath="${1:-}"
     shift
     
@@ -1188,6 +1199,7 @@ cmd_export_users_path_all() {
 
 # Command: export-users-cbi-all
 cmd_export_users_cbi_all() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users-cbi-all; return 0; }
     # Load username
     if ! load_username_from_config || [[ -z "${VAULT_USERNAME:-}" ]]; then
         log_error "No username configured. Run 'vaultctl login' first."
@@ -1256,6 +1268,7 @@ _show_read_usage() {
 
 # Command: read
 cmd_read() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help read; return 0; }
     local mount=""
     local path=""
     local batch=false
@@ -1460,6 +1473,7 @@ cmd_read() {
 
 # Command: write
 cmd_write() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help write; return 0; }
     local mount="${1:-}"
     local path="${2:-}"
     shift 2 2>/dev/null || true
@@ -1587,6 +1601,7 @@ cmd_write() {
 
 # Command: mv
 cmd_mv() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help mv; return 0; }
     local mount="${1:-}"
     local src_path="${2:-}"
     local dst_path="${3:-}"
@@ -1711,6 +1726,7 @@ cmd_mv() {
 
 # Command: rm
 cmd_rm() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help rm; return 0; }
     local mount=""
     local path=""
     local force=false
@@ -1827,6 +1843,7 @@ cmd_rm() {
 
 # Command: export-vault
 cmd_export_vault() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-vault; return 0; }
     # Load token silently (redirect all output to /dev/null)
     if ! load_token_from_file &>/dev/null; then
         echo "Error: Not authenticated. Run \"vaultctl login\" first." >&2
@@ -2191,6 +2208,7 @@ _vault_progress_monitor() {
 
 # Command: find
 cmd_find() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help find; return 0; }
     local mount="${1:-}"
     shift || true
     local pattern="*"
@@ -2419,6 +2437,7 @@ cmd_find() {
 
 # Command: renew
 cmd_renew() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help renew; return 0; }
     local increment="2h"
     if [[ $# -ge 1 ]]; then
         increment="$1"
@@ -2685,6 +2704,7 @@ _select_delete() {
 
 # Command: select
 cmd_select() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help select; return 0; }
     local subcommand="${1:-}"
     case "$subcommand" in
         ""|current|show)
@@ -2708,6 +2728,354 @@ cmd_select() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Per-command help (called when a command receives --help or -h)
+show_command_help() {
+    local cmd="$1"
+    case "$cmd" in
+        login)
+            cat << 'EOF'
+Usage: vaultctl login
+
+Authenticate to Vault using LDAP credentials.
+Reads username from config or prompts interactively.
+Stores the token in the profile's token file.
+
+Examples:
+  vaultctl login
+EOF
+            ;;
+        logout)
+            cat << 'EOF'
+Usage: vaultctl logout
+
+Revoke the current Vault token and remove local credentials.
+
+Examples:
+  vaultctl logout
+EOF
+            ;;
+        status)
+            cat << 'EOF'
+Usage: vaultctl status
+
+Show current authentication status: active profile, server address,
+username, and token validity.
+
+Examples:
+  vaultctl status
+EOF
+            ;;
+        config)
+            cat << 'EOF'
+Usage: vaultctl config [--profile <name>] [<KEY>=<value>]
+
+Manage per-profile configuration settings.
+
+Options:
+  --profile <name>   Target a specific profile instead of the active one
+
+Arguments:
+  KEY=value          Set a configuration value
+
+Supported keys:
+  VAULT_MOUNT        Default mount point for read/write operations
+  VAULT_ADDR         Vault server URL
+  VAULT_CACHE_TTL    Cache time-to-live in seconds
+  VAULT_PARALLEL     Number of parallel scan workers
+
+Examples:
+  vaultctl config                                    # Show active profile config
+  vaultctl config --profile staging                  # Show staging profile config
+  vaultctl config VAULT_MOUNT=cbi                    # Set mount for active profile
+  vaultctl config --profile staging VAULT_MOUNT=api  # Set mount for another profile
+  vaultctl config VAULT_ADDR=https://vault.example.com
+  vaultctl config VAULT_CACHE_TTL=3600
+  vaultctl config VAULT_PARALLEL=10
+EOF
+            ;;
+        read)
+            cat << 'EOF'
+Usage: vaultctl read [options] [<mount>] <path>[/<field>]
+
+Read a secret from Vault. If <field> is appended to the path, returns
+just that field value. Otherwise lists all keys at that path.
+If mount is omitted, VAULT_MOUNT env var or config is used.
+
+Options:
+  -b, --batch   Silent mode: suppress all messages, only return exit code
+  -v, --verbose Show vault commands being executed
+  -c, --clip    Copy output to clipboard (xclip or xsel)
+
+Examples:
+  vaultctl read cbi technology.cbi/github.com/api-token
+  vaultctl read users john/cbi JENKINS_USERNAME
+  vaultctl read technology.cbi/github.com/api-token   # uses VAULT_MOUNT
+  vaultctl read -b cbi path/to/secret/field           # silent, check exit code only
+EOF
+            ;;
+        write)
+            cat << 'EOF'
+Usage: vaultctl write [<mount>] <path> <key>=<value> [<key>=<value> ...]
+       vaultctl write [<mount>] <path> <key>=@<file>   # read value from file
+       vaultctl write [<mount>] <path> @<json-file>    # bulk write from JSON
+
+Write one or more secrets to Vault. If mount is omitted, VAULT_MOUNT
+env var or config is used.
+
+Examples:
+  vaultctl write cbi technology.cbi/github.com api-token=abc123
+  vaultctl write users john/cbi username=john password=secret
+  vaultctl write cbi myproject/db password=@/run/secrets/db.pass
+  vaultctl write technology.cbi/github.com api-token=abc123  # uses VAULT_MOUNT
+EOF
+            ;;
+        find)
+            cat << 'EOF'
+Usage: vaultctl find <mount> [pattern] [options]
+
+Search for secret paths in a Vault mount. Results are cached locally
+to speed up subsequent searches.
+
+Arguments:
+  mount     Vault mount point to search (e.g. cbi, users)
+  pattern   Optional glob pattern (default: * = all paths)
+
+Options:
+  --no-cache            Bypass cache, scan live (still updates cache)
+  --no-cache-write      Scan live without updating the cache
+  -b, --bare            Output raw paths only (no progress or log messages)
+  --clear-cache         Clear cached index for this mount and exit
+  --clear-all-cache     Clear all mount caches and exit (mount not required)
+  --cache-info          Show cache status for this mount (or all if no mount)
+  --cache-ttl <s>       Override cache TTL in seconds (default: 3600)
+  --parallel <n>        Number of parallel scan workers
+
+Examples:
+  vaultctl find users                        # List all paths in users mount
+  vaultctl find users '*/cbi/*'              # Find paths under any user's cbi dir
+  vaultctl find cbi 'technology.cbi/*'       # Find paths under technology.cbi
+  vaultctl find users john/* --no-cache      # Force live scan
+  vaultctl find users --clear-cache          # Invalidate cached index
+  vaultctl find --clear-all-cache            # Invalidate all caches
+  vaultctl find cbi 'tech*' -b               # Bare output for piping
+EOF
+            ;;
+        mv)
+            cat << 'EOF'
+Usage: vaultctl mv <mount> <src-path> <dst-path>
+
+Move (rename) a secret path within a mount. Copies all fields to the
+new path then permanently deletes the source.
+
+Examples:
+  vaultctl mv cbi technology.cbi/old-repo technology.cbi/new-repo
+  vaultctl mv users john/old-path john/new-path
+
+  # Bulk rename using find + mv:
+  vaultctl find cbi '*repo3.*' -b | while read p; do
+    vaultctl mv cbi "$p" "$(echo "$p" | sed 's/repo3/repo/')"
+  done
+EOF
+            ;;
+        rm)
+            cat << 'EOF'
+Usage: vaultctl rm [-f] <mount> <path>
+
+Permanently delete a secret path and all its versions/metadata.
+
+Options:
+  -f, --force   Skip confirmation prompt
+
+Examples:
+  vaultctl rm cbi technology.cbi/old-repo.eclipse.org
+  vaultctl rm -f users john/deprecated-key
+EOF
+            ;;
+        renew)
+            cat << 'EOF'
+Usage: vaultctl renew [increment]
+
+Renew the current Vault token. Default increment is 2h.
+
+Arguments:
+  increment   Token TTL increment (e.g. 1h, 30m, 2h). Default: 2h
+
+Examples:
+  vaultctl renew
+  vaultctl renew 8h
+EOF
+            ;;
+        export-vault)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-vault)
+
+Export Vault authentication variables (VAULT_ADDR, VAULT_TOKEN) to the
+current shell session. Useful for running the vault CLI directly.
+
+Examples:
+  eval $(vaultctl export-vault)
+  vault kv list cbi/
+EOF
+            ;;
+        export-env)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-env [options] <mount> <path> <ENV_VAR[:key]> [...])
+
+Export specific secrets from a Vault path as environment variables.
+If ENV_VAR:key is provided, the env var name and vault key can differ.
+If only ENV_VAR is provided, it is used as both the env var name and vault key.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-env users john USER:username PASS:password)
+  eval $(vaultctl export-env cbi technology.cbi/github.com API_TOKEN:api-token)
+  eval $(vaultctl export-env users john username --prefix MY_ --uppercase)
+EOF
+            ;;
+        export-env-all)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-env-all [options] <mount> <path>)
+
+Export ALL secrets from a Vault mount/path as environment variables.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-env-all users john)
+  eval $(vaultctl export-env-all cbi technology.cbi/github.com --prefix GH_ --uppercase)
+EOF
+            ;;
+        export-users)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users [options] <ENV_VAR[:key]> [...])
+
+Export specific secrets from users/<your-username>/ as environment variables.
+Username is derived from the VAULT_USERNAME config or your email address.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users JENKINS_USERNAME JENKINS_PASSWORD)
+  eval $(vaultctl export-users jenkins_username --prefix CI_ --uppercase)
+EOF
+            ;;
+        export-users-all)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users-all [options])
+
+Export ALL secrets from users/<your-username>/ as environment variables.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users-all)
+  eval $(vaultctl export-users-all --prefix MY_ --uppercase)
+EOF
+            ;;
+        export-users-path)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users-path [options] <subpath> <ENV_VAR[:key]> [...])
+
+Export specific secrets from users/<your-username>/<subpath>/ as environment variables.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users-path cbi JENKINS_USERNAME)
+  eval $(vaultctl export-users-path cbi JENKINS_USERNAME --prefix CBI_)
+EOF
+            ;;
+        export-users-path-all)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users-path-all [options] <subpath>)
+
+Export ALL secrets from users/<your-username>/<subpath>/ as environment variables.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users-path-all cbi)
+  eval $(vaultctl export-users-path-all cbi --prefix CBI_ --uppercase)
+EOF
+            ;;
+        export-users-cbi)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users-cbi [options] <ENV_VAR[:key]> [...])
+
+Export specific secrets from users/<your-username>/cbi/ as environment variables.
+Shorthand for: vaultctl export-users-path cbi ...
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users-cbi JENKINS_USERNAME JENKINS_PASSWORD)
+  eval $(vaultctl export-users-cbi JENKINS_USERNAME --prefix CBI_)
+EOF
+            ;;
+        export-users-cbi-all)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users-cbi-all [options])
+
+Export ALL secrets from users/<your-username>/cbi/ as environment variables.
+Shorthand for: vaultctl export-users-path-all cbi
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users-cbi-all)
+  eval $(vaultctl export-users-cbi-all --prefix CBI_ --uppercase)
+EOF
+            ;;
+        select)
+            cat << 'EOF'
+Usage: vaultctl select [<name> | list | create <name> [--addr URL] | delete <name>]
+
+Manage and switch between Vault instance profiles. All profiles are stored
+in ~/.vaultctl using INI sections. Each profile has its own token file and
+cache directory.
+
+Subcommands:
+  (none)                      Show active profile info
+  list                        List all profiles with active marker
+  <name>                      Switch to a profile
+  create <name> [--addr URL]  Create a new profile section
+  delete <name>               Delete a profile (not active, not default)
+
+Options for create:
+  --addr <URL>   Set the Vault server URL for the new profile
+
+Examples:
+  vaultctl select                                            # Show active profile
+  vaultctl select list                                       # List all profiles
+  vaultctl select staging                                    # Switch to staging
+  vaultctl select create staging --addr https://vault.staging.example.com
+  vaultctl select delete staging                             # Delete staging profile
+EOF
+            ;;
+        *)
+            log_error "No help available for command: $cmd"
+            return 1
+            ;;
+    esac
+}
 
 # Show help
 show_help() {
@@ -2909,15 +3277,18 @@ main() {
     
     case "$command" in
         login)
-            cmd_login
+            shift
+            cmd_login "$@"
             exit $?
             ;;
         logout)
-            cmd_logout
+            shift
+            cmd_logout "$@"
             exit $?
             ;;
         status)
-            cmd_status
+            shift
+            cmd_status "$@"
             exit $?
             ;;
         config)
@@ -2926,7 +3297,8 @@ main() {
             exit $?
             ;;
         export-vault)
-            cmd_export_vault
+            shift
+            cmd_export_vault "$@"
             exit $?
             ;;
         read)
