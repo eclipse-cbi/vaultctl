@@ -30,7 +30,9 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y vault
           elif [ "$RUNNER_OS" == "macOS" ]; then
-            brew install jq vault
+            brew install jq
+            brew tap hashicorp/tap
+            brew install hashicorp/tap/vault
           fi
 
       - name: Test local installation
