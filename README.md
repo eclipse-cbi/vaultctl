@@ -150,15 +150,19 @@ This means you can override config file settings by exporting environment variab
 ### Configuration Files
 
 - **`~/.vaultctl`** (or `$VAULT_CONFIG_FILE`) - Stores all configuration and all profile settings.
-  Uses plain `KEY=VALUE` for the default profile; named profiles use INI-style `[name]` sections:
+  Uses INI-style `[name]` sections for every profile, including `[default]`. Only `CURRENT_PROFILE` lives outside any section:
   ```ini
-  CURRENT_PROFILE=staging        # active profile (omit for default)
+  CURRENT_PROFILE=staging        # active profile (top-level key, omit for default)
+
+  [default]
   VAULT_ADDR=https://secretsmanager.eclipse.org
-  VAULT_USERNAME=john            # default profile settings
+  VAULT_USERNAME=john
+  VAULT_MOUNT=cbi
 
   [staging]
   VAULT_ADDR=https://vault.staging.example.com
   VAULT_USERNAME=john.staging
+  VAULT_MOUNT=my-staging-mount
   ```
 - **`~/.vault-token`** - Authentication token for the **default** profile
 - **`~/.vaultctl_tokens/<name>.token`** - Authentication token for each named profile
@@ -252,32 +256,36 @@ eval $(vaultctl export-vault)
 ```
 
 #### `config`
-Manage vaultctl configuration settings.
+Manage vaultctl configuration settings. Use `--profile <name>` to configure a profile other than the currently active one.
 
 ```bash
-# Show current configuration
+# Show active profile's configuration
 vaultctl config
 
-# Set default mount point
+# Show a specific profile's configuration
+vaultctl config --profile staging
+
+# Set mount point for the active profile
 vaultctl config VAULT_MOUNT=cbi
+
+# Set mount point for a specific profile (no need to switch first)
+vaultctl config --profile staging VAULT_MOUNT=staging-mount
+vaultctl config --profile default VAULT_MOUNT=cbi
 
 # Set custom Vault server address
 vaultctl config VAULT_ADDR=https://vault.example.com
+vaultctl config --profile staging VAULT_ADDR=https://vault.staging.example.com
 
 # Set cache TTL (in seconds)
 vaultctl config VAULT_CACHE_TTL=3600
 
 # Set number of parallel workers for scanning
 vaultctl config VAULT_PARALLEL=10
-
-# Now you can use commands without specifying mount
-vaultctl read technology.cbi/github.com/api-token
-vaultctl write myproject/secrets key=value
 ```
 
 **Supported Configuration Keys:**
-- `VAULT_MOUNT` - Default mount point for read/write operations
-- `VAULT_ADDR` - Vault server address
+- `VAULT_MOUNT` - Mount point for read/write operations (per-profile)
+- `VAULT_ADDR` - Vault server address (per-profile)
 - `VAULT_CACHE_TTL` - Cache time-to-live in seconds
 - `VAULT_PARALLEL` - Number of parallel scan workers
 

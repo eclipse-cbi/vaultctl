@@ -141,13 +141,13 @@ load_config() {
 }
 
 # Save configuration to file (section-aware INI writer)
-# Writes key=value into the active profile's section.
-# For "default" (flat section), writes before the first [section] header.
-# For named profiles, writes within [profile] ... next [section].
+# All profiles (including "default") live in a named [section].
+# CURRENT_PROFILE stays as a top-level flat key, managed separately by _select_switch.
+# Backward-compat: old flat keys for the same key name are removed when writing to [default].
 save_config() {
     local key="$1"
     local value="$2"
-    local active="${VAULT_CURRENT_PROFILE:-default}"
+    local active="${3:-${VAULT_CURRENT_PROFILE:-default}}"
 
     # Create config file if it doesn't exist
     if [[ ! -f "$VAULT_CONFIG_FILE" ]]; then
@@ -157,31 +157,36 @@ save_config() {
 
     local temp_file
     temp_file=$(mktemp)
-    local section="default"
+    # "__preamble__" = before first [section] header (only CURRENT_PROFILE lives here)
+    local section="__preamble__"
     local in_target=false
     local key_written=false
-    local section_found=false
 
     while IFS= read -r line; do
         # Detect section header
         if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
             local new_section="${BASH_REMATCH[1]}"
-            # If we were in target section and key wasn't written yet, write it now
+            # Leaving a section: flush key if it wasn't written inside
             if [[ "$in_target" == true && "$key_written" == false ]]; then
                 echo "${key}=${value}" >> "$temp_file"
                 key_written=true
             fi
             section="$new_section"
             [[ "$section" == "$active" ]] && in_target=true || in_target=false
-            [[ "$section" == "$active" ]] && section_found=true
             echo "$line" >> "$temp_file"
             continue
         fi
-        # Update in_target for flat "default" section
+        # Preamble: drop old flat key matching our target (migration to [default] section)
+        if [[ "$section" == "__preamble__" ]]; then
+            if [[ "$active" == "default" && "$line" =~ ^([^=]+)=(.*)$ && "${BASH_REMATCH[1]}" == "$key" ]]; then
+                continue  # drop; will be written to [default] section instead
+            fi
+            echo "$line" >> "$temp_file"
+            continue
+        fi
+        # Inside a named section: replace key if found
         if [[ "$section" == "$active" ]]; then
             in_target=true
-            section_found=true
-            # Try to replace existing key in this section
             if [[ "$line" =~ ^([^=]+)=(.*)$ && "${BASH_REMATCH[1]}" == "$key" ]]; then
                 echo "${key}=${value}" >> "$temp_file"
                 key_written=true
@@ -191,18 +196,16 @@ save_config() {
         echo "$line" >> "$temp_file"
     done < "$VAULT_CONFIG_FILE"
 
-    # If we finished inside the target section but key wasn't written yet
+    # End of file: flush key if still inside the target section
     if [[ "$in_target" == true && "$key_written" == false ]]; then
         echo "${key}=${value}" >> "$temp_file"
         key_written=true
     fi
 
-    # If the target section was never encountered, append it (only for named profiles)
+    # Target section not found: create it
     if [[ "$key_written" == false ]]; then
-        if [[ "$active" != "default" ]]; then
-            echo "" >> "$temp_file"
-            echo "[${active}]" >> "$temp_file"
-        fi
+        echo "" >> "$temp_file"
+        echo "[${active}]" >> "$temp_file"
         echo "${key}=${value}" >> "$temp_file"
     fi
 
@@ -395,7 +398,8 @@ _update_config_var() {
     local key="$1"
     local value="$2"
     local need_export="${3:-false}"
-    
+    local target_profile="${4:-}"
+
     # Validate based on key type
     case "$key" in
         VAULT_MOUNT|VAULT_ADDR)
@@ -417,18 +421,26 @@ _update_config_var() {
             fi
             ;;
     esac
-    
-    # Save to config file
-    save_config "$key" "$value"
-    
-    # Set variable (with or without export)
-    if [[ "$need_export" == "true" ]]; then
-        export "$key=$value"
+
+    # Save to config file (optionally into a specific profile section)
+    if [[ -n "$target_profile" ]]; then
+        save_config "$key" "$value" "$target_profile"
     else
-        eval "$key=\$value"
+        save_config "$key" "$value"
     fi
-    
-    log_success "Configuration updated: $key=$value"
+
+    # Only update the in-memory variable when writing to the active profile
+    local active="${VAULT_CURRENT_PROFILE:-default}"
+    if [[ -z "$target_profile" || "$target_profile" == "$active" ]]; then
+        if [[ "$need_export" == "true" ]]; then
+            export "$key=$value"
+        else
+            eval "$key=\$value"
+        fi
+    fi
+
+    local profile_label="${target_profile:-${VAULT_CURRENT_PROFILE:-default}}"
+    log_success "Configuration updated: $key=$value (profile: $profile_label)"
     log_info "Configuration saved to: $VAULT_CONFIG_FILE"
     return 0
 }
@@ -436,27 +448,56 @@ _update_config_var() {
 # Command: config - Manage configuration
 cmd_config() {
     local show_config=false
-    
+    local target_profile=""
+
     # If no arguments, show current config
     if [[ $# -eq 0 ]]; then
         show_config=true
     fi
-    
-    # Parse arguments
-    for arg in "$@"; do
+
+    # Parse --profile flag first
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --profile)
+                target_profile="${2:-}"
+                if [[ -z "$target_profile" ]]; then
+                    log_error "--profile requires a profile name"
+                    return 1
+                fi
+                if ! _select_profile_exists "$target_profile"; then
+                    log_error "Profile '$target_profile' does not exist. Run 'vaultctl select create $target_profile' first."
+                    return 1
+                fi
+                shift 2
+                ;;
+            *)
+                args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    # If only --profile was given (no KEY=value), show that profile's config
+    if [[ ${#args[@]} -eq 0 ]]; then
+        show_config=true
+    fi
+
+    # Parse KEY=value arguments
+    for arg in "${args[@]}"; do
         if [[ "$arg" == *"="* ]]; then
             local key="${arg%%=*}"
             local value="${arg#*=}"
-            
+
             case "$key" in
                 VAULT_MOUNT)
-                    _update_config_var "$key" "$value" "false" || return 1
+                    _update_config_var "$key" "$value" "false" "$target_profile" || return 1
                     ;;
                 VAULT_ADDR)
-                    _update_config_var "$key" "$value" "true" || return 1
+                    _update_config_var "$key" "$value" "true" "$target_profile" || return 1
                     ;;
                 VAULT_CACHE_TTL|VAULT_PARALLEL)
-                    _update_config_var "$key" "$value" "false" || return 1
+                    _update_config_var "$key" "$value" "false" "$target_profile" || return 1
                     ;;
                 *)
                     log_error "Unknown configuration key: $key"
@@ -469,26 +510,47 @@ cmd_config() {
             return 1
         fi
     done
-    
+
     # Show current configuration
     if [[ "$show_config" == true ]]; then
-        # Load config to display current values
-        load_config
-        
-        log_info "Current configuration:"
+        local display_profile="${target_profile:-${VAULT_CURRENT_PROFILE:-default}}"
+        log_info "Configuration (profile: $display_profile):"
         log_info "Configuration file: $VAULT_CONFIG_FILE"
         echo ""
-        
+
+        # Read and show the requested profile's section values
+        local section="__preamble__"
+        local addr="" mount="" ttl="" parallel=""
         if [[ -f "$VAULT_CONFIG_FILE" ]]; then
-            cat "$VAULT_CONFIG_FILE"
-            echo ""
+            while IFS= read -r line; do
+                [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+                if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+                    section="${BASH_REMATCH[1]}"
+                    continue
+                fi
+                # For backward compat, flat keys count as [default]
+                local effective_section="$section"
+                [[ "$section" == "__preamble__" ]] && effective_section="default"
+                [[ "$effective_section" != "$display_profile" ]] && continue
+                if [[ "$line" =~ ^([^=]+)=(.*)$ ]]; then
+                    local k="${BASH_REMATCH[1]}" v="${BASH_REMATCH[2]}"
+                    v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+                    case "$k" in
+                        VAULT_ADDR)        addr="$v" ;;
+                        VAULT_MOUNT)       mount="$v" ;;
+                        VAULT_CACHE_TTL)   ttl="$v" ;;
+                        VAULT_PARALLEL)    parallel="$v" ;;
+                    esac
+                fi
+            done < "$VAULT_CONFIG_FILE"
         fi
-        printf "  %-18s %s\n" "VAULT_ADDR" "${VAULT_ADDR:-(default)}"
-        printf "  %-18s %s\n" "VAULT_MOUNT" "${VAULT_MOUNT:-(not set)}"
-        printf "  %-18s %s\n" "VAULT_CACHE_TTL" "${VAULT_CACHE_TTL:-(default)} seconds"
-        printf "  %-18s %s\n" "VAULT_PARALLEL" "${VAULT_PARALLEL:-(default)} workers"
+
+        printf "  %-18s %s\n" "VAULT_ADDR"      "${addr:-(default: https://secretsmanager.eclipse.org)}"
+        printf "  %-18s %s\n" "VAULT_MOUNT"     "${mount:-(not set)}"
+        printf "  %-18s %s\n" "VAULT_CACHE_TTL" "${ttl:-(default)} seconds"
+        printf "  %-18s %s\n" "VAULT_PARALLEL"  "${parallel:-(default)} workers"
     fi
-    
+
     return 0
 }
 
@@ -2383,12 +2445,18 @@ cmd_renew() {
 
 # List all profile names: "default" plus any [section] found in the config file
 _select_all_profiles() {
-    echo "default"
+    local found_default=false
     if [[ -f "$VAULT_CONFIG_FILE" ]]; then
         while IFS= read -r line; do
-            [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]] && echo "${BASH_REMATCH[1]}"
+            if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+                local profile_name="${BASH_REMATCH[1]}"
+                [[ "$profile_name" == "default" ]] && found_default=true
+                echo "$profile_name"
+            fi
         done < "$VAULT_CONFIG_FILE"
     fi
+    # Fallback: always include "default" even if no [default] section exists yet
+    [[ "$found_default" == false ]] && echo "default"
 }
 
 # Return 0 if the named profile exists (default always exists)
@@ -2425,6 +2493,7 @@ _select_get_addr() {
 _select_show_current() {
     log_info "Profile : $VAULT_CURRENT_PROFILE"
     log_info "VAULT_ADDR : $VAULT_ADDR"
+    log_info "VAULT_MOUNT : ${VAULT_MOUNT:-(not set)}"
     log_info "Config  : $VAULT_CONFIG_FILE"
     log_info "Token   : $VAULT_TOKEN_FILE"
 }
@@ -2657,11 +2726,13 @@ Commands:
   status
       Show current authentication status
       
-  config [<KEY>=<value>]
-      Manage vaultctl configuration
-      Usage: vaultctl config                    # Show current config
-             vaultctl config VAULT_MOUNT=cbi   # Set default mount
-      Supported keys: VAULT_MOUNT
+  config [--profile <name>] [<KEY>=<value>]
+      Manage vaultctl configuration (per-profile)
+      Usage: vaultctl config                               # Show active profile's config
+             vaultctl config --profile <name>             # Show a specific profile's config
+             vaultctl config VAULT_MOUNT=cbi              # Set mount for active profile
+             vaultctl config --profile staging VAULT_MOUNT=api  # Set mount for another profile
+      Supported keys: VAULT_MOUNT, VAULT_ADDR, VAULT_CACHE_TTL, VAULT_PARALLEL
       
   export-vault
       Export vault environment variables for current shell
