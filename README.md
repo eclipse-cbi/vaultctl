@@ -15,6 +15,8 @@
     - [Environment Variables](#environment-variables)
     - [Configuration Files](#configuration-files)
   - [Commands](#commands)
+    - [Profiles](#profiles)
+      - [`select`](#select)
     - [Authentication](#authentication)
       - [`login`](#login)
       - [`logout`](#logout)
@@ -40,6 +42,7 @@
       - [`export-users-cbi-all`](#export-users-cbi-all)
   - [Usage Examples](#usage-examples)
     - [Complete Workflow](#complete-workflow)
+    - [Multi-Instance Workflow](#multi-instance-workflow)
     - [In script](#in-script)
     - [Batch Mode for Scripts](#batch-mode-for-scripts)
     - [Cache Management](#cache-management)
@@ -59,6 +62,7 @@
 - **Parallel Scanning** - Multi-worker secret discovery for large vaults
 - **Caching** - Configurable TTL-based caching for search performance
 - **User secrets specific mount** - Helpers for user-specific paths (`users/<username>`)
+- **Multi-instance profiles** - Switch between vault instances with `vaultctl select`; all profiles stored in a single `~/.vaultctl` file
 
 
 ## Prerequisites
@@ -145,11 +149,80 @@ This means you can override config file settings by exporting environment variab
 
 ### Configuration Files
 
-- **`~/.vault-token`** - Stores your authentication token
-- **`~/.vaultctl`** (or `$VAULT_CONFIG_FILE`) - Stores configuration (username, VAULT_MOUNT, etc.)
-- **`~/.vaultctl_cache/`** (or `$VAULT_CACHE_DIR`) - Directory for cached secret indexes
+- **`~/.vaultctl`** (or `$VAULT_CONFIG_FILE`) - Stores all configuration and all profile settings.
+  Uses INI-style `[name]` sections for every profile, including `[default]`. Only `CURRENT_PROFILE` lives outside any section:
+  ```ini
+  CURRENT_PROFILE=staging        # active profile (top-level key, omit for default)
+
+  [default]
+  VAULT_ADDR=https://secretsmanager.eclipse.org
+  VAULT_USERNAME=john
+  VAULT_MOUNT=cbi
+
+  [staging]
+  VAULT_ADDR=https://vault.staging.example.com
+  VAULT_USERNAME=john.staging
+  VAULT_MOUNT=my-staging-mount
+  ```
+- **`~/.vault-token`** - Authentication token for the **default** profile
+- **`~/.vaultctl_tokens/<name>.token`** - Authentication token for each named profile
+- **`~/.vaultctl_cache/`** (or `$VAULT_CACHE_DIR`) - Cache for the default profile
+- **`~/.vaultctl_cache/<name>/`** - Cache for each named profile
 
 ## Commands
+
+### Profiles
+
+#### `select`
+
+Manage and switch between Vault instance profiles. All profile settings are stored in a single `~/.vaultctl` file using INI-style sections — no scattered config files.
+
+```bash
+vaultctl select                              # Show active profile
+vaultctl select list                         # List all profiles
+vaultctl select <name>                       # Switch to a profile
+vaultctl select create <name> [--addr URL]   # Create a new profile
+vaultctl select delete <name>                # Delete a profile
+```
+
+**Examples:**
+```bash
+# Show the currently active profile
+vaultctl select
+#  Profile : default
+#  VAULT_ADDR : https://secretsmanager.eclipse.org
+
+# Create profiles for different vault instances
+vaultctl select create staging --addr https://vault.staging.example.com
+vaultctl select create prod    --addr https://vault.prod.example.com
+
+# List all profiles (* = active)
+vaultctl select list
+#   * default               https://secretsmanager.eclipse.org
+#     staging               https://vault.staging.example.com
+#     prod                  https://vault.prod.example.com
+
+# Switch to a profile and login
+vaultctl select staging
+vaultctl login
+
+# Each profile stores its own token and cache
+# Token: ~/.vaultctl_tokens/staging.token
+# Cache: ~/.vaultctl_cache/staging/
+
+# Switch back to the default profile
+vaultctl select default
+
+# Delete a profile (must not be the active one)
+vaultctl select delete staging
+```
+
+**Notes:**
+- The `default` profile is built-in and cannot be deleted. It uses `~/.vault-token` and `~/.vaultctl_cache/` for backward compatibility.
+- `vaultctl config` and `vaultctl login` always operate on the currently active profile.
+- Profile names must match `[A-Za-z0-9_-]+`.
+
+---
 
 ### Authentication
 
@@ -183,32 +256,36 @@ eval $(vaultctl export-vault)
 ```
 
 #### `config`
-Manage vaultctl configuration settings.
+Manage vaultctl configuration settings. Use `--profile <name>` to configure a profile other than the currently active one.
 
 ```bash
-# Show current configuration
+# Show active profile's configuration
 vaultctl config
 
-# Set default mount point
+# Show a specific profile's configuration
+vaultctl config --profile staging
+
+# Set mount point for the active profile
 vaultctl config VAULT_MOUNT=cbi
+
+# Set mount point for a specific profile (no need to switch first)
+vaultctl config --profile staging VAULT_MOUNT=staging-mount
+vaultctl config --profile default VAULT_MOUNT=cbi
 
 # Set custom Vault server address
 vaultctl config VAULT_ADDR=https://vault.example.com
+vaultctl config --profile staging VAULT_ADDR=https://vault.staging.example.com
 
 # Set cache TTL (in seconds)
 vaultctl config VAULT_CACHE_TTL=3600
 
 # Set number of parallel workers for scanning
 vaultctl config VAULT_PARALLEL=10
-
-# Now you can use commands without specifying mount
-vaultctl read technology.cbi/github.com/api-token
-vaultctl write myproject/secrets key=value
 ```
 
 **Supported Configuration Keys:**
-- `VAULT_MOUNT` - Default mount point for read/write operations
-- `VAULT_ADDR` - Vault server address
+- `VAULT_MOUNT` - Mount point for read/write operations (per-profile)
+- `VAULT_ADDR` - Vault server address (per-profile)
 - `VAULT_CACHE_TTL` - Cache time-to-live in seconds
 - `VAULT_PARALLEL` - Number of parallel scan workers
 
@@ -515,6 +592,32 @@ vaultctl write cbi technology.cbi/repo.eclipse.org token-username=my-secret-toke
 vaultctl logout
 # ✅ Token revoked successfully
 # ✅ Logged out successfully
+```
+
+### Multi-Instance Workflow
+
+```bash
+# One-time setup: create profiles for each Vault instance
+vaultctl select create eclipse  --addr https://secretsmanager.eclipse.org
+vaultctl select create staging  --addr https://vault.staging.example.com
+
+# Authenticate each profile independently
+vaultctl select eclipse && vaultctl login
+vaultctl select staging && vaultctl login
+
+# Daily use: switch profiles like kubectl contexts
+vaultctl select eclipse
+vaultctl read cbi technology.cbi/github.com/api-token
+
+vaultctl select staging
+vaultctl read cbi my-project/staging-token
+
+# Config changes are profile-scoped
+vaultctl select eclipse
+vaultctl config VAULT_MOUNT=cbi   # applies only to eclipse profile
+
+vaultctl select staging
+vaultctl config VAULT_MOUNT=my-staging-mount  # applies only to staging profile
 ```
 
 ### In script

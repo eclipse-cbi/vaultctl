@@ -396,7 +396,7 @@ test_vaultctl_config() {
     unset VAULT_MOUNT
     
     ######## Test config without arguments (show config) #############################################
-    result=$("$VAULTCTL" config 2>&1 | grep -c "Current configuration:" || true)
+    result=$("$VAULTCTL" config 2>&1 | grep -c "Configuration" || true)
     if [[ "$result" -gt 0 ]]; then
         echo -e "INFO: vaultctl config show without file \u2705"
     else
@@ -415,7 +415,7 @@ test_vaultctl_config() {
         [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
         exit 1
     fi
-    
+
     # Verify config was written
     if [[ -f "$config_file" ]] && grep -q "VAULT_MOUNT=test_mount" "$config_file"; then
         echo -e "INFO: vaultctl config file written correctly \u2705"
@@ -424,7 +424,59 @@ test_vaultctl_config() {
         [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
         exit 1
     fi
-    
+
+    ######## Test --profile flag #############################################
+    # Create a staging profile to test cross-profile config
+    "$VAULTCTL" select create staging --addr https://vault.staging.example.com > /dev/null 2>&1 || true
+
+    result=$("$VAULTCTL" config --profile staging VAULT_MOUNT=staging-mount 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Configuration updated: VAULT_MOUNT=staging-mount"* && "$result" == *"staging"* ]]; then
+        echo -e "INFO: vaultctl config --profile staging writes to staging section \u2705"
+    else
+        echo -e "ERROR: vaultctl config --profile staging failed \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    # Verify key is in [staging] section, not in [default]
+    local in_staging_cfg=false cur_sec=""
+    while IFS= read -r line; do
+        [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]] && cur_sec="${BASH_REMATCH[1]}"
+        [[ "$cur_sec" == "staging" && "$line" == "VAULT_MOUNT=staging-mount" ]] && in_staging_cfg=true
+    done < "$config_file"
+    if [[ "$in_staging_cfg" == "true" ]]; then
+        echo -e "INFO: --profile staging writes to correct section \u2705"
+    else
+        echo -e "ERROR: --profile staging did not write to [staging] section \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    # --profile with show (no KEY=value) displays target profile's values
+    result=$("$VAULTCTL" config --profile staging 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"staging"* && "$result" == *"staging-mount"* ]]; then
+        echo -e "INFO: vaultctl config --profile staging shows staging config \u2705"
+    else
+        echo -e "ERROR: vaultctl config --profile staging should show staging config \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    # --profile with nonexistent profile is rejected
+    result=$("$VAULTCTL" config --profile nosuchprofile VAULT_MOUNT=x 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"does not exist"* ]]; then
+        echo -e "INFO: vaultctl config --profile nonexistent rejected \u2705"
+    else
+        echo -e "ERROR: vaultctl config --profile nonexistent should be rejected \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    # Cleanup staging profile
+    "$VAULTCTL" select delete staging > /dev/null 2>&1 || true
+
     ######## Test invalid config key #############################################
     result=$("$VAULTCTL" config INVALID_KEY=value 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     if [[ "$result" == *"Unknown configuration key: INVALID_KEY"* ]]; then
@@ -434,7 +486,7 @@ test_vaultctl_config() {
         [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
         exit 1
     fi
-    
+
     ######## Test empty value #############################################
     result=$("$VAULTCTL" config VAULT_MOUNT= 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
     if [[ "$result" == *"VAULT_MOUNT value cannot be empty"* ]]; then
@@ -444,7 +496,7 @@ test_vaultctl_config() {
         [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
         exit 1
     fi
-    
+
     # Restore backup if any
     if [[ -n "$backup_file" ]]; then
         mv "$backup_file" "$config_file"
@@ -546,6 +598,279 @@ test_vaultctl_write_default_mount() {
     fi
 }
 
+# Test cases for vaultctl select (profile management - no vault connection required)
+test_vaultctl_select() {
+    local result
+    local config_file="$VAULT_CONFIG_FILE"
+
+    # Backup existing config
+    local backup_file=""
+    if [[ -f "$config_file" ]]; then
+        backup_file=$(mktemp)
+        cp "$config_file" "$backup_file"
+    fi
+
+    # Start from a clean config (default profile only)
+    rm -f "$config_file"
+    echo "VAULT_ADDR=https://secretsmanager.eclipse.org" > "$config_file"
+    echo "VAULT_USERNAME=john" >> "$config_file"
+    chmod 600 "$config_file"
+
+    ######## Show current profile (default) ########################################
+    result=$("$VAULTCTL" select 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Profile : default"* ]]; then
+        echo -e "INFO: vaultctl select shows default profile \u2705"
+    else
+        echo -e "ERROR: vaultctl select should show default profile \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Create a new profile ##################################################
+    result=$("$VAULTCTL" select create staging --addr https://vault.staging.example.com 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Profile 'staging' created"* ]]; then
+        echo -e "INFO: vaultctl select create staging \u2705"
+    else
+        echo -e "ERROR: vaultctl select create staging failed \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    # Verify [staging] section was written with correct VAULT_ADDR
+    if grep -q "^\[staging\]" "$config_file" && grep -A5 "^\[staging\]" "$config_file" | grep -q "VAULT_ADDR=https://vault.staging.example.com"; then
+        echo -e "INFO: staging section written to config \u2705"
+    else
+        echo -e "ERROR: staging section missing or incorrect in config \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Duplicate create should fail ##########################################
+    result=$("$VAULTCTL" select create staging 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"already exists"* ]]; then
+        echo -e "INFO: vaultctl select create duplicate rejected \u2705"
+    else
+        echo -e "ERROR: vaultctl select create duplicate should be rejected \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Cannot create 'default' ################################################
+    result=$("$VAULTCTL" select create default 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Cannot create"* ]]; then
+        echo -e "INFO: vaultctl select create default rejected \u2705"
+    else
+        echo -e "ERROR: vaultctl select create default should be rejected \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## List shows both profiles ##############################################
+    result=$("$VAULTCTL" select list 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"default"* && "$result" == *"staging"* ]]; then
+        echo -e "INFO: vaultctl select list shows both profiles \u2705"
+    else
+        echo -e "ERROR: vaultctl select list missing profiles \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    # Default should be marked active (*)
+    if echo "$result" | grep -q "\* *default"; then
+        echo -e "INFO: vaultctl select list marks default as active \u2705"
+    else
+        echo -e "ERROR: vaultctl select list should mark default as active \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Switch to staging profile #############################################
+    result=$("$VAULTCTL" select staging 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Switched to profile: staging"* ]]; then
+        echo -e "INFO: vaultctl select staging \u2705"
+    else
+        echo -e "ERROR: vaultctl select staging failed \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    # Verify CURRENT_PROFILE written before first [section] header
+    local cp_line sec_line
+    cp_line=$(grep -n "^CURRENT_PROFILE=" "$config_file" | head -1 | cut -d: -f1)
+    sec_line=$(grep -n "^\[" "$config_file" | head -1 | cut -d: -f1)
+    if [[ -n "$cp_line" && -n "$sec_line" && "$cp_line" -lt "$sec_line" ]]; then
+        echo -e "INFO: CURRENT_PROFILE is in flat (default) section \u2705"
+    else
+        echo -e "ERROR: CURRENT_PROFILE not in flat section (cp=$cp_line sec=$sec_line) \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Switch to non-existent profile should fail ############################
+    result=$("$VAULTCTL" select nonexistent 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"does not exist"* ]]; then
+        echo -e "INFO: vaultctl select nonexistent rejected \u2705"
+    else
+        echo -e "ERROR: vaultctl select nonexistent should be rejected \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Switch back to default ################################################
+    result=$("$VAULTCTL" select default 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Switched to profile: default"* ]]; then
+        echo -e "INFO: vaultctl select default \u2705"
+    else
+        echo -e "ERROR: vaultctl select default failed \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Cannot delete 'default' ################################################
+    result=$("$VAULTCTL" select delete default 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Cannot delete"* ]]; then
+        echo -e "INFO: vaultctl select delete default rejected \u2705"
+    else
+        echo -e "ERROR: vaultctl select delete default should be rejected \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Cannot delete active profile ##########################################
+    "$VAULTCTL" select staging > /dev/null 2>&1 || true
+    result=$("$VAULTCTL" select delete staging 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Cannot delete the active profile"* ]]; then
+        echo -e "INFO: vaultctl select delete active profile rejected \u2705"
+    else
+        echo -e "ERROR: vaultctl select delete active profile should be rejected \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Delete a non-active profile ###########################################
+    "$VAULTCTL" select default > /dev/null 2>&1 || true
+    result=$("$VAULTCTL" select delete staging 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Profile 'staging' deleted"* ]]; then
+        echo -e "INFO: vaultctl select delete staging \u2705"
+    else
+        echo -e "ERROR: vaultctl select delete staging failed \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    # Verify [staging] section is gone
+    if ! grep -q "^\[staging\]" "$config_file"; then
+        echo -e "INFO: staging section removed from config \u2705"
+    else
+        echo -e "ERROR: staging section still present after delete \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Profile config isolation: config written per profile ##################
+    # Create fresh staging profile
+    "$VAULTCTL" select create staging --addr https://vault.staging.example.com > /dev/null 2>&1
+    "$VAULTCTL" select staging > /dev/null 2>&1 || true
+
+    # Write a config key while on staging - should land in [staging] section
+    "$VAULTCTL" config VAULT_MOUNT=staging-mount > /dev/null 2>&1 || true
+
+    # Verify it's in [staging] section, not in default section
+    local in_staging=false
+    local cur_section="default"
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+            cur_section="${BASH_REMATCH[1]}"
+            continue
+        fi
+        if [[ "$cur_section" == "staging" && "$line" == "VAULT_MOUNT=staging-mount" ]]; then
+            in_staging=true
+        fi
+    done < "$config_file"
+
+    if [[ "$in_staging" == "true" ]]; then
+        echo -e "INFO: config key written to correct profile section \u2705"
+    else
+        echo -e "ERROR: config key not found in staging section \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    # Switch back to default and verify VAULT_MOUNT is not polluted
+    "$VAULTCTL" select default > /dev/null 2>&1 || true
+    local default_mount
+    default_mount=$("$VAULTCTL" config 2>&1 | grep "VAULT_MOUNT" | grep -v "staging-mount" | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$default_mount" != *"staging-mount"* ]]; then
+        echo -e "INFO: default profile VAULT_MOUNT not polluted by staging \u2705"
+    else
+        echo -e "ERROR: default profile VAULT_MOUNT should not contain staging-mount \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## VAULT_MOUNT for default profile goes to [default] section #############
+    "$VAULTCTL" config VAULT_MOUNT=default-mount > /dev/null 2>&1 || true
+
+    local in_default_section=false
+    local cur_section=""
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+            cur_section="${BASH_REMATCH[1]}"
+            continue
+        fi
+        if [[ "$cur_section" == "default" && "$line" == "VAULT_MOUNT=default-mount" ]]; then
+            in_default_section=true
+        fi
+    done < "$config_file"
+
+    if [[ "$in_default_section" == "true" ]]; then
+        echo -e "INFO: default VAULT_MOUNT written to [default] section \u2705"
+    else
+        echo -e "ERROR: default VAULT_MOUNT should be in [default] section \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    ######## Backward compat: flat-key config still readable ########################
+    rm -f "$config_file"
+    printf 'VAULT_ADDR=https://legacy.example.com\nVAULT_USERNAME=legacyuser\n' > "$config_file"
+    chmod 600 "$config_file"
+
+    result=$("$VAULTCTL" select 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+    if [[ "$result" == *"Profile : default"* ]]; then
+        echo -e "INFO: flat-key (legacy) config still readable as default profile \u2705"
+    else
+        echo -e "ERROR: flat-key config should still work (backward compat) \u274c"
+        echo "Result: $result"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    "$VAULTCTL" config VAULT_MOUNT=legacy-mount > /dev/null 2>&1 || true
+    if grep -q "^\[default\]" "$config_file" && grep -A5 "^\[default\]" "$config_file" | grep -q "VAULT_MOUNT=legacy-mount"; then
+        echo -e "INFO: first save on legacy config creates [default] section \u2705"
+    else
+        echo -e "ERROR: save on legacy config should create [default] section \u274c"
+        [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file"
+        exit 1
+    fi
+
+    # Cleanup
+    [[ -n "$backup_file" ]] && mv "$backup_file" "$config_file" || rm -f "$config_file"
+}
+
 # Run tests
 echo -e "Passing tests for vaultctl read and vaultctl write...\n"
 test_vaultctl_write_read
@@ -559,5 +884,7 @@ echo -e "\nTests for vaultctl read with default mount...\n"
 test_vaultctl_read_default_mount
 echo -e "\nTests for vaultctl write with default mount...\n"
 test_vaultctl_write_default_mount
+echo -e "\nTests for vaultctl select (profile management)...\n"
+test_vaultctl_select
 
 echo -e "\nAll tests passed! \u2705"

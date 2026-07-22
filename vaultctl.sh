@@ -14,17 +14,43 @@
 
 # Configuration
 # Default values (can be overridden by config file or environment variables)
-readonly VAULT_TOKEN_FILE="$HOME/.vault-token"
 
-# Set VAULT_CONFIG_FILE if not already set
+# Profile management — all profiles live in ~/.vaultctl via INI sections
+# Read the active profile from the CURRENT_PROFILE top-level key (before any [section])
+_read_current_profile() {
+    local p="" line
+    local config="${VAULT_CONFIG_FILE:-$HOME/.vaultctl}"
+    if [[ -f "$config" ]]; then
+        while IFS= read -r line; do
+            [[ "$line" =~ ^\[.*\]$ ]] && break
+            [[ "$line" =~ ^CURRENT_PROFILE=(.+)$ ]] && { p="${BASH_REMATCH[1]}"; break; }
+        done < "$config"
+    fi
+    [[ -z "$p" ]] && echo "default" || echo "$p"
+}
+VAULT_CURRENT_PROFILE=$(_read_current_profile)
+readonly VAULT_CURRENT_PROFILE
+
+# Config file is always ~/.vaultctl (same for all profiles)
 if [[ -z "${VAULT_CONFIG_FILE:-}" ]]; then
     VAULT_CONFIG_FILE="$HOME/.vaultctl"
 fi
 readonly VAULT_CONFIG_FILE
 
-# Set VAULT_CACHE_DIR if not already set
+# Token and cache paths are profile-aware
+if [[ "$VAULT_CURRENT_PROFILE" == "default" ]]; then
+    VAULT_TOKEN_FILE="${VAULT_TOKEN_FILE:-$HOME/.vault-token}"
+else
+    VAULT_TOKEN_FILE="${VAULT_TOKEN_FILE:-$HOME/.vaultctl_tokens/${VAULT_CURRENT_PROFILE}.token}"
+fi
+readonly VAULT_TOKEN_FILE
+
 if [[ -z "${VAULT_CACHE_DIR:-}" ]]; then
-    VAULT_CACHE_DIR="$HOME/.vaultctl_cache"
+    if [[ "$VAULT_CURRENT_PROFILE" == "default" ]]; then
+        VAULT_CACHE_DIR="$HOME/.vaultctl_cache"
+    else
+        VAULT_CACHE_DIR="$HOME/.vaultctl_cache/$VAULT_CURRENT_PROFILE"
+    fi
 fi
 readonly VAULT_CACHE_DIR
 
@@ -76,103 +102,142 @@ check_vault_cli() {
     return 0
 }
 
-# Load configuration from file
+# Load configuration from file (section-aware INI parser)
 load_config() {
-    # Priority order for all variables: env -> config -> default
-    
-    # Load from config file if it exists
+    local active="${VAULT_CURRENT_PROFILE:-default}"
+    local section="default"
+
     if [[ -f "$VAULT_CONFIG_FILE" ]]; then
-        while IFS='=' read -r key value; do
+        while IFS= read -r line; do
             # Skip comments and empty lines
-            [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
-            # Remove quotes from value
-            value="${value%\"}"
-            value="${value#\"}"
-            value="${value%\'}"
-            value="${value#\'}"
-            
-            # Handle supported configuration keys (only if not already set in env)
-            case "$key" in
-                VAULT_MOUNT|VAULT_ADDR|VAULT_CACHE_TTL|VAULT_PARALLEL)
-                    # Check if variable is already set in environment
-                    if [[ -z "${!key:-}" ]]; then
-                        # Only VAULT_ADDR needs to be exported (used by vault CLI)
-                        if [[ "$key" == "VAULT_ADDR" ]]; then
-                            export "$key=$value"
-                        else
-                            eval "$key=\$value"
+            [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+            # Detect section header [profile_name]
+            if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+                section="${BASH_REMATCH[1]}"
+                continue
+            fi
+            # Only process keys belonging to the active profile's section
+            [[ "$section" != "$active" ]] && continue
+            # Parse KEY=VALUE
+            if [[ "$line" =~ ^([^=]+)=(.*)$ ]]; then
+                local key="${BASH_REMATCH[1]}"
+                local value="${BASH_REMATCH[2]}"
+                value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
+                case "$key" in
+                    VAULT_MOUNT|VAULT_ADDR|VAULT_CACHE_TTL|VAULT_PARALLEL)
+                        if [[ -z "${!key:-}" ]]; then
+                            [[ "$key" == "VAULT_ADDR" ]] && export "$key=$value" || eval "$key=\$value"
                         fi
-                    fi
-                    ;;
-            esac
+                        ;;
+                esac
+            fi
         done < "$VAULT_CONFIG_FILE"
     fi
-    
+
     # Apply defaults if still not set
     export VAULT_ADDR="${VAULT_ADDR:-https://secretsmanager.eclipse.org}"
     VAULT_CACHE_TTL="${VAULT_CACHE_TTL:-86400}"  # Default: 1 day
     VAULT_PARALLEL="${VAULT_PARALLEL:-5}"        # Default: 5 workers
 }
 
-# Save configuration to file
+# Save configuration to file (section-aware INI writer)
+# All profiles (including "default") live in a named [section].
+# CURRENT_PROFILE stays as a top-level flat key, managed separately by _select_switch.
+# Backward-compat: old flat keys for the same key name are removed when writing to [default].
 save_config() {
     local key="$1"
     local value="$2"
-    
+    local active="${3:-${VAULT_CURRENT_PROFILE:-default}}"
+
     # Create config file if it doesn't exist
     if [[ ! -f "$VAULT_CONFIG_FILE" ]]; then
         touch "$VAULT_CONFIG_FILE" 2>/dev/null || true
         chmod 600 "$VAULT_CONFIG_FILE" 2>/dev/null || true
     fi
-    
-    # Create or update config file
-    local temp_file=$(mktemp)
-    local found=false
-    
-    if [[ -f "$VAULT_CONFIG_FILE" ]]; then
-        while IFS='=' read -r current_key current_value; do
-            if [[ "$current_key" == "$key" ]]; then
+
+    local temp_file
+    temp_file=$(mktemp)
+    # "__preamble__" = before first [section] header (only CURRENT_PROFILE lives here)
+    local section="__preamble__"
+    local in_target=false
+    local key_written=false
+
+    while IFS= read -r line; do
+        # Detect section header
+        if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+            local new_section="${BASH_REMATCH[1]}"
+            # Leaving a section: flush key if it wasn't written inside
+            if [[ "$in_target" == true && "$key_written" == false ]]; then
                 echo "${key}=${value}" >> "$temp_file"
-                found=true
-            else
-                echo "${current_key}=${current_value}" >> "$temp_file"
+                key_written=true
             fi
-        done < "$VAULT_CONFIG_FILE"
+            section="$new_section"
+            [[ "$section" == "$active" ]] && in_target=true || in_target=false
+            echo "$line" >> "$temp_file"
+            continue
+        fi
+        # Preamble: drop old flat key matching our target (migration to [default] section)
+        if [[ "$section" == "__preamble__" ]]; then
+            if [[ "$active" == "default" && "$line" =~ ^([^=]+)=(.*)$ && "${BASH_REMATCH[1]}" == "$key" ]]; then
+                continue  # drop; will be written to [default] section instead
+            fi
+            echo "$line" >> "$temp_file"
+            continue
+        fi
+        # Inside a named section: replace key if found
+        if [[ "$section" == "$active" ]]; then
+            in_target=true
+            if [[ "$line" =~ ^([^=]+)=(.*)$ && "${BASH_REMATCH[1]}" == "$key" ]]; then
+                echo "${key}=${value}" >> "$temp_file"
+                key_written=true
+                continue
+            fi
+        fi
+        echo "$line" >> "$temp_file"
+    done < "$VAULT_CONFIG_FILE"
+
+    # End of file: flush key if still inside the target section
+    if [[ "$in_target" == true && "$key_written" == false ]]; then
+        echo "${key}=${value}" >> "$temp_file"
+        key_written=true
     fi
-    
-    # If key wasn't found, append it
-    if [[ "$found" == false ]]; then
+
+    # Target section not found: create it
+    if [[ "$key_written" == false ]]; then
+        echo "" >> "$temp_file"
+        echo "[${active}]" >> "$temp_file"
         echo "${key}=${value}" >> "$temp_file"
     fi
-    
+
     mv "$temp_file" "$VAULT_CONFIG_FILE"
     chmod 600 "$VAULT_CONFIG_FILE"
-    
     return 0
 }
 
-# Get config value
+# Get config value from the active profile's section
 get_config() {
     local key="$1"
     local default="${2:-}"
-    
+    local active="${VAULT_CURRENT_PROFILE:-default}"
+    local section="default"
+
     if [[ -f "$VAULT_CONFIG_FILE" ]]; then
-        while IFS='=' read -r current_key value; do
-            # Skip comments and empty lines
-            [[ "$current_key" =~ ^#.*$ || -z "$current_key" ]] && continue
-            
-            if [[ "$current_key" == "$key" ]]; then
-                # Remove quotes from value
-                value="${value%\"}"
-                value="${value#\"}"
-                value="${value%\'}"
-                value="${value#\'}"
+        while IFS= read -r line; do
+            [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+            if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+                section="${BASH_REMATCH[1]}"
+                continue
+            fi
+            [[ "$section" != "$active" ]] && continue
+            if [[ "$line" =~ ^([^=]+)=(.*)$ && "${BASH_REMATCH[1]}" == "$key" ]]; then
+                local value="${BASH_REMATCH[2]}"
+                value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
                 echo "$value"
                 return 0
             fi
         done < "$VAULT_CONFIG_FILE"
     fi
-    
+
     echo "$default"
     return 0
 }
@@ -221,22 +286,13 @@ _is_token_valid() {
     return $?
 }
 
-# Load username from config
+# Load username from config (section-aware via get_config)
 load_username_from_config() {
-    if [[ -f "$VAULT_CONFIG_FILE" ]]; then
-        # Safely parse VAULT_USERNAME from config without executing the file
-        local line username
-        line="$(grep -m1 '^VAULT_USERNAME=' "$VAULT_CONFIG_FILE" 2>/dev/null || true)"
-        if [[ -n "$line" ]]; then
-            username="${line#VAULT_USERNAME=}"
-            # Remove optional surrounding double quotes
-            username="${username%\"}"
-            username="${username#\"}"
-            if [[ -n "$username" ]]; then
-                VAULT_USERNAME="$username"
-                return 0
-            fi
-        fi
+    local username
+    username=$(get_config "VAULT_USERNAME")
+    if [[ -n "$username" ]]; then
+        VAULT_USERNAME="$username"
+        return 0
     fi
     return 1
 }
@@ -244,8 +300,7 @@ load_username_from_config() {
 # Save username to config
 save_username_to_config() {
     local username="$1"
-    echo "VAULT_USERNAME=\"$username\"" > "$VAULT_CONFIG_FILE"
-    chmod 600 "$VAULT_CONFIG_FILE"
+    save_config "VAULT_USERNAME" "$username"
     return 0
 }
 
@@ -285,10 +340,17 @@ get_vault_username() {
 vault_ldap_login() {
     log_info "Logging in to Vault using LDAP method..."
     log_info "Vault address: $VAULT_ADDR"
-    
+
     if vault login -method=ldap -address="$VAULT_ADDR" username="$VAULT_USERNAME" >/dev/null; then
         log_success "Vault login successful"
-        
+
+        # vault CLI always writes to ~/.vault-token; for non-default profiles, copy it
+        if [[ "$VAULT_TOKEN_FILE" != "$HOME/.vault-token" && -f "$HOME/.vault-token" ]]; then
+            mkdir -p "$(dirname "$VAULT_TOKEN_FILE")" 2>/dev/null || true
+            cp "$HOME/.vault-token" "$VAULT_TOKEN_FILE"
+            chmod 600 "$VAULT_TOKEN_FILE"
+        fi
+
         # Load the token that was just saved
         if load_token_from_file; then
             log_success "Token loaded and validated"
@@ -302,6 +364,7 @@ vault_ldap_login() {
 
 # Command: login
 cmd_login() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help login; return 0; }
     # Check if token is already valid
     if load_token_from_file; then
         log_success "Already authenticated with a valid token"
@@ -336,7 +399,8 @@ _update_config_var() {
     local key="$1"
     local value="$2"
     local need_export="${3:-false}"
-    
+    local target_profile="${4:-}"
+
     # Validate based on key type
     case "$key" in
         VAULT_MOUNT|VAULT_ADDR)
@@ -358,46 +422,84 @@ _update_config_var() {
             fi
             ;;
     esac
-    
-    # Save to config file
-    save_config "$key" "$value"
-    
-    # Set variable (with or without export)
-    if [[ "$need_export" == "true" ]]; then
-        export "$key=$value"
+
+    # Save to config file (optionally into a specific profile section)
+    if [[ -n "$target_profile" ]]; then
+        save_config "$key" "$value" "$target_profile"
     else
-        eval "$key=\$value"
+        save_config "$key" "$value"
     fi
-    
-    log_success "Configuration updated: $key=$value"
+
+    # Only update the in-memory variable when writing to the active profile
+    local active="${VAULT_CURRENT_PROFILE:-default}"
+    if [[ -z "$target_profile" || "$target_profile" == "$active" ]]; then
+        if [[ "$need_export" == "true" ]]; then
+            export "$key=$value"
+        else
+            eval "$key=\$value"
+        fi
+    fi
+
+    local profile_label="${target_profile:-${VAULT_CURRENT_PROFILE:-default}}"
+    log_success "Configuration updated: $key=$value (profile: $profile_label)"
     log_info "Configuration saved to: $VAULT_CONFIG_FILE"
     return 0
 }
 
 # Command: config - Manage configuration
 cmd_config() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help config; return 0; }
     local show_config=false
-    
+    local target_profile=""
+
     # If no arguments, show current config
     if [[ $# -eq 0 ]]; then
         show_config=true
     fi
-    
-    # Parse arguments
-    for arg in "$@"; do
+
+    # Parse --profile flag first
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --profile)
+                target_profile="${2:-}"
+                if [[ -z "$target_profile" ]]; then
+                    log_error "--profile requires a profile name"
+                    return 1
+                fi
+                if ! _select_profile_exists "$target_profile"; then
+                    log_error "Profile '$target_profile' does not exist. Run 'vaultctl select create $target_profile' first."
+                    return 1
+                fi
+                shift 2
+                ;;
+            *)
+                args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    # If only --profile was given (no KEY=value), show that profile's config
+    if [[ ${#args[@]} -eq 0 ]]; then
+        show_config=true
+    fi
+
+    # Parse KEY=value arguments
+    for arg in "${args[@]}"; do
         if [[ "$arg" == *"="* ]]; then
             local key="${arg%%=*}"
             local value="${arg#*=}"
-            
+
             case "$key" in
                 VAULT_MOUNT)
-                    _update_config_var "$key" "$value" "false" || return 1
+                    _update_config_var "$key" "$value" "false" "$target_profile" || return 1
                     ;;
                 VAULT_ADDR)
-                    _update_config_var "$key" "$value" "true" || return 1
+                    _update_config_var "$key" "$value" "true" "$target_profile" || return 1
                     ;;
                 VAULT_CACHE_TTL|VAULT_PARALLEL)
-                    _update_config_var "$key" "$value" "false" || return 1
+                    _update_config_var "$key" "$value" "false" "$target_profile" || return 1
                     ;;
                 *)
                     log_error "Unknown configuration key: $key"
@@ -410,31 +512,54 @@ cmd_config() {
             return 1
         fi
     done
-    
+
     # Show current configuration
     if [[ "$show_config" == true ]]; then
-        # Load config to display current values
-        load_config
-        
-        log_info "Current configuration:"
+        local display_profile="${target_profile:-${VAULT_CURRENT_PROFILE:-default}}"
+        log_info "Configuration (profile: $display_profile):"
         log_info "Configuration file: $VAULT_CONFIG_FILE"
         echo ""
-        
+
+        # Read and show the requested profile's section values
+        local section="__preamble__"
+        local addr="" mount="" ttl="" parallel=""
         if [[ -f "$VAULT_CONFIG_FILE" ]]; then
-            cat "$VAULT_CONFIG_FILE"
-            echo ""
+            while IFS= read -r line; do
+                [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+                if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+                    section="${BASH_REMATCH[1]}"
+                    continue
+                fi
+                # For backward compat, flat keys count as [default]
+                local effective_section="$section"
+                [[ "$section" == "__preamble__" ]] && effective_section="default"
+                [[ "$effective_section" != "$display_profile" ]] && continue
+                if [[ "$line" =~ ^([^=]+)=(.*)$ ]]; then
+                    local k="${BASH_REMATCH[1]}" v="${BASH_REMATCH[2]}"
+                    v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+                    case "$k" in
+                        VAULT_ADDR)        addr="$v" ;;
+                        VAULT_MOUNT)       mount="$v" ;;
+                        VAULT_CACHE_TTL)   ttl="$v" ;;
+                        VAULT_PARALLEL)    parallel="$v" ;;
+                    esac
+                fi
+            done < "$VAULT_CONFIG_FILE"
         fi
-        printf "  %-18s %s\n" "VAULT_ADDR" "${VAULT_ADDR:-(default)}"
-        printf "  %-18s %s\n" "VAULT_MOUNT" "${VAULT_MOUNT:-(not set)}"
-        printf "  %-18s %s\n" "VAULT_CACHE_TTL" "${VAULT_CACHE_TTL:-(default)} seconds"
-        printf "  %-18s %s\n" "VAULT_PARALLEL" "${VAULT_PARALLEL:-(default)} workers"
+
+        printf "  %-18s %s\n" "VAULT_ADDR"      "${addr:-(default: https://secretsmanager.eclipse.org)}"
+        printf "  %-18s %s\n" "VAULT_MOUNT"     "${mount:-(not set)}"
+        printf "  %-18s %s\n" "VAULT_CACHE_TTL" "${ttl:-(default)} seconds"
+        printf "  %-18s %s\n" "VAULT_PARALLEL"  "${parallel:-(default)} workers"
     fi
-    
+
     return 0
 }
 
 # Command: status
-cmd_status() {    
+cmd_status() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help status; return 0; }
+    log_info "Profile: $VAULT_CURRENT_PROFILE"
     log_info "VAULT_ADDR: $VAULT_ADDR"
     
     # Load username if available
@@ -458,6 +583,7 @@ cmd_status() {
 
 # Command: logout
 cmd_logout() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help logout; return 0; }
     local token_to_revoke=""
     
     # Check if VAULT_TOKEN is set in environment
@@ -719,6 +845,7 @@ _export_all_secrets() {
 
 # Command: export-env
 cmd_export_env() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-env; return 0; }
     local mount="${1:-}"
     local path="${2:-}"
     shift 2
@@ -802,6 +929,7 @@ cmd_export_env() {
 
 # Command: export-env-all
 cmd_export_env_all() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-env-all; return 0; }
     local mount="${1:-}"
     local path="${2:-}"
     shift 2
@@ -914,6 +1042,7 @@ _process_user_secrets() {
 
 # Command: export-users
 cmd_export_users() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users; return 0; }
     local mappings=("${@}")
     
     if [[ ${#mappings[@]} -eq 0 ]]; then
@@ -950,6 +1079,7 @@ cmd_export_users() {
 
 # Command: export-users-path
 cmd_export_users_path() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users-path; return 0; }
     local subpath="${1:-}"
     local mappings=("${@:2}")
     
@@ -982,6 +1112,7 @@ cmd_export_users_path() {
 
 # Command: export-users-cbi
 cmd_export_users_cbi() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users-cbi; return 0; }
     local mappings=("${@}")
     
     if [[ ${#mappings[@]} -eq 0 ]]; then
@@ -1010,6 +1141,7 @@ cmd_export_users_cbi() {
 
 # Command: export-users-all
 cmd_export_users_all() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users-all; return 0; }
     # Load username
     if ! load_username_from_config || [[ -z "${VAULT_USERNAME:-}" ]]; then
         log_error "No username configured. Run 'vaultctl login' first."
@@ -1027,6 +1159,7 @@ cmd_export_users_all() {
 
 # Command: export-users-path-all
 cmd_export_users_path_all() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users-path-all; return 0; }
     local subpath="${1:-}"
     shift
     
@@ -1066,6 +1199,7 @@ cmd_export_users_path_all() {
 
 # Command: export-users-cbi-all
 cmd_export_users_cbi_all() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-users-cbi-all; return 0; }
     # Load username
     if ! load_username_from_config || [[ -z "${VAULT_USERNAME:-}" ]]; then
         log_error "No username configured. Run 'vaultctl login' first."
@@ -1134,6 +1268,7 @@ _show_read_usage() {
 
 # Command: read
 cmd_read() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help read; return 0; }
     local mount=""
     local path=""
     local batch=false
@@ -1338,6 +1473,7 @@ cmd_read() {
 
 # Command: write
 cmd_write() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help write; return 0; }
     local mount="${1:-}"
     local path="${2:-}"
     shift 2 2>/dev/null || true
@@ -1465,6 +1601,7 @@ cmd_write() {
 
 # Command: mv
 cmd_mv() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help mv; return 0; }
     local mount="${1:-}"
     local src_path="${2:-}"
     local dst_path="${3:-}"
@@ -1589,6 +1726,7 @@ cmd_mv() {
 
 # Command: rm
 cmd_rm() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help rm; return 0; }
     local mount=""
     local path=""
     local force=false
@@ -1705,6 +1843,7 @@ cmd_rm() {
 
 # Command: export-vault
 cmd_export_vault() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-vault; return 0; }
     # Load token silently (redirect all output to /dev/null)
     if ! load_token_from_file &>/dev/null; then
         echo "Error: Not authenticated. Run \"vaultctl login\" first." >&2
@@ -2069,6 +2208,7 @@ _vault_progress_monitor() {
 
 # Command: find
 cmd_find() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help find; return 0; }
     local mount="${1:-}"
     shift || true
     local pattern="*"
@@ -2297,6 +2437,7 @@ cmd_find() {
 
 # Command: renew
 cmd_renew() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help renew; return 0; }
     local increment="2h"
     if [[ $# -ge 1 ]]; then
         increment="$1"
@@ -2319,6 +2460,623 @@ cmd_renew() {
     return 0
 }
 
+# ─── Profile (select) helpers ────────────────────────────────────────────────
+
+# List all profile names: "default" plus any [section] found in the config file
+_select_all_profiles() {
+    local found_default=false
+    if [[ -f "$VAULT_CONFIG_FILE" ]]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+                local profile_name="${BASH_REMATCH[1]}"
+                [[ "$profile_name" == "default" ]] && found_default=true
+                echo "$profile_name"
+            fi
+        done < "$VAULT_CONFIG_FILE"
+    fi
+    # Fallback: always include "default" even if no [default] section exists yet
+    [[ "$found_default" == false ]] && echo "default"
+}
+
+# Return 0 if the named profile exists (default always exists)
+_select_profile_exists() {
+    local name="$1"
+    [[ "$name" == "default" ]] && return 0
+    _select_all_profiles | grep -qx "$name"
+}
+
+# Get VAULT_ADDR for a given profile name (reads directly from file, not active profile)
+_select_get_addr() {
+    local target="$1"
+    local section="default"
+    if [[ -f "$VAULT_CONFIG_FILE" ]]; then
+        while IFS= read -r line; do
+            [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+            if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+                section="${BASH_REMATCH[1]}"
+                continue
+            fi
+            [[ "$section" != "$target" ]] && continue
+            if [[ "$line" =~ ^VAULT_ADDR=(.+)$ ]]; then
+                local v="${BASH_REMATCH[1]}"
+                v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+                echo "$v"
+                return 0
+            fi
+        done < "$VAULT_CONFIG_FILE"
+    fi
+    echo "(not set)"
+}
+
+# Show current profile info
+_select_show_current() {
+    log_info "Profile : $VAULT_CURRENT_PROFILE"
+    log_info "VAULT_ADDR : $VAULT_ADDR"
+    log_info "VAULT_MOUNT : ${VAULT_MOUNT:-(not set)}"
+    log_info "Config  : $VAULT_CONFIG_FILE"
+    log_info "Token   : $VAULT_TOKEN_FILE"
+}
+
+# List all profiles with active marker
+_select_list() {
+    log_info "Available profiles:"
+    echo ""
+    while IFS= read -r name; do
+        local addr
+        addr=$(_select_get_addr "$name")
+        if [[ "$name" == "$VAULT_CURRENT_PROFILE" ]]; then
+            printf "  * %-20s  %s\n" "$name" "$addr"
+        else
+            printf "    %-20s  %s\n" "$name" "$addr"
+        fi
+    done < <(_select_all_profiles)
+}
+
+# Switch to a profile
+_select_switch() {
+    local name="$1"
+    if ! _select_profile_exists "$name"; then
+        log_error "Profile '$name' does not exist. Run 'vaultctl select create $name' first."
+        return 1
+    fi
+    # Save CURRENT_PROFILE into the default (flat) section
+    # We need to write this as a top-level key, before any [section] header.
+    # Temporarily switch active context to "default" for the write, then restore.
+    local temp_file
+    temp_file=$(mktemp)
+    local section="default"
+    local key_written=false
+    local found=false
+
+    if [[ -f "$VAULT_CONFIG_FILE" ]]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+                # Before first section header: if key not written yet, insert it
+                if [[ "$key_written" == false ]]; then
+                    echo "CURRENT_PROFILE=${name}" >> "$temp_file"
+                    key_written=true
+                fi
+                echo "$line" >> "$temp_file"
+                continue
+            fi
+            if [[ "$line" =~ ^CURRENT_PROFILE=.*$ ]]; then
+                echo "CURRENT_PROFILE=${name}" >> "$temp_file"
+                key_written=true
+                found=true
+                continue
+            fi
+            echo "$line" >> "$temp_file"
+        done < "$VAULT_CONFIG_FILE"
+    fi
+
+    # If key wasn't written yet (empty file or no [sections])
+    if [[ "$key_written" == false ]]; then
+        echo "CURRENT_PROFILE=${name}" >> "$temp_file"
+    fi
+
+    mv "$temp_file" "$VAULT_CONFIG_FILE"
+    chmod 600 "$VAULT_CONFIG_FILE"
+
+    local addr
+    addr=$(_select_get_addr "$name")
+    log_success "Switched to profile: $name"
+    log_info "VAULT_ADDR: $addr"
+    log_info "Run 'vaultctl login' to authenticate for this profile"
+    return 0
+}
+
+# Create a new profile section
+_select_create() {
+    local name="${1:-}"
+    local addr=""
+    shift || true
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --addr)
+                addr="${2:-}"
+                shift 2
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+
+    if [[ -z "$name" ]]; then
+        log_error "Usage: vaultctl select create <name> [--addr URL]"
+        return 1
+    fi
+    if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        log_error "Profile name must only contain letters, digits, hyphens, and underscores."
+        return 1
+    fi
+    if [[ "$name" == "default" ]]; then
+        log_error "Cannot create a profile named 'default' (it is built-in)."
+        return 1
+    fi
+    if _select_profile_exists "$name"; then
+        log_error "Profile '$name' already exists."
+        return 1
+    fi
+
+    # Append [name] section (and optional VAULT_ADDR) to config file
+    if [[ ! -f "$VAULT_CONFIG_FILE" ]]; then
+        touch "$VAULT_CONFIG_FILE" 2>/dev/null || true
+        chmod 600 "$VAULT_CONFIG_FILE" 2>/dev/null || true
+    fi
+    {
+        echo ""
+        echo "[${name}]"
+        [[ -n "$addr" ]] && echo "VAULT_ADDR=${addr}"
+    } >> "$VAULT_CONFIG_FILE"
+
+    log_success "Profile '$name' created."
+    [[ -n "$addr" ]] && log_info "VAULT_ADDR: $addr"
+    log_info "Run 'vaultctl select $name' to switch to this profile."
+    return 0
+}
+
+# Delete a profile
+_select_delete() {
+    local name="${1:-}"
+
+    if [[ -z "$name" ]]; then
+        log_error "Usage: vaultctl select delete <name>"
+        return 1
+    fi
+    if [[ "$name" == "default" ]]; then
+        log_error "Cannot delete the 'default' profile."
+        return 1
+    fi
+    if [[ "$name" == "$VAULT_CURRENT_PROFILE" ]]; then
+        log_error "Cannot delete the active profile '$name'. Switch to another profile first."
+        return 1
+    fi
+    if ! _select_profile_exists "$name"; then
+        log_error "Profile '$name' does not exist."
+        return 1
+    fi
+
+    # Remove the [name] section and all its keys from the config file
+    local temp_file
+    temp_file=$(mktemp)
+    local section="default"
+    local skip=false
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\[([A-Za-z0-9_-]+)\]$ ]]; then
+            local s="${BASH_REMATCH[1]}"
+            if [[ "$s" == "$name" ]]; then
+                skip=true
+                section="$s"
+                continue
+            else
+                skip=false
+                section="$s"
+            fi
+        fi
+        [[ "$skip" == true ]] && continue
+        echo "$line" >> "$temp_file"
+    done < "$VAULT_CONFIG_FILE"
+
+    mv "$temp_file" "$VAULT_CONFIG_FILE"
+    chmod 600 "$VAULT_CONFIG_FILE"
+
+    # Remove token file if present
+    local token_file="$HOME/.vaultctl_tokens/${name}.token"
+    if [[ -f "$token_file" ]]; then
+        rm -f "$token_file"
+        log_info "Token file removed: $token_file"
+    fi
+
+    # Remove cache directory if present
+    local cache_dir="$HOME/.vaultctl_cache/${name}"
+    if [[ -d "$cache_dir" ]]; then
+        rm -rf "$cache_dir"
+        log_info "Cache directory removed: $cache_dir"
+    fi
+
+    log_success "Profile '$name' deleted."
+    return 0
+}
+
+# Command: select
+cmd_select() {
+    [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help select; return 0; }
+    local subcommand="${1:-}"
+    case "$subcommand" in
+        ""|current|show)
+            _select_show_current
+            ;;
+        list|ls)
+            _select_list
+            ;;
+        create|add)
+            shift
+            _select_create "$@"
+            ;;
+        delete|rm)
+            shift
+            _select_delete "$@"
+            ;;
+        *)
+            _select_switch "$subcommand"
+            ;;
+    esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Per-command help (called when a command receives --help or -h)
+show_command_help() {
+    local cmd="$1"
+    case "$cmd" in
+        login)
+            cat << 'EOF'
+Usage: vaultctl login
+
+Authenticate to Vault using LDAP credentials.
+Reads username from config or prompts interactively.
+Stores the token in the profile's token file.
+
+Examples:
+  vaultctl login
+EOF
+            ;;
+        logout)
+            cat << 'EOF'
+Usage: vaultctl logout
+
+Revoke the current Vault token and remove local credentials.
+
+Examples:
+  vaultctl logout
+EOF
+            ;;
+        status)
+            cat << 'EOF'
+Usage: vaultctl status
+
+Show current authentication status: active profile, server address,
+username, and token validity.
+
+Examples:
+  vaultctl status
+EOF
+            ;;
+        config)
+            cat << 'EOF'
+Usage: vaultctl config [--profile <name>] [<KEY>=<value>]
+
+Manage per-profile configuration settings.
+
+Options:
+  --profile <name>   Target a specific profile instead of the active one
+
+Arguments:
+  KEY=value          Set a configuration value
+
+Supported keys:
+  VAULT_MOUNT        Default mount point for read/write operations
+  VAULT_ADDR         Vault server URL
+  VAULT_CACHE_TTL    Cache time-to-live in seconds
+  VAULT_PARALLEL     Number of parallel scan workers
+
+Examples:
+  vaultctl config                                    # Show active profile config
+  vaultctl config --profile staging                  # Show staging profile config
+  vaultctl config VAULT_MOUNT=cbi                    # Set mount for active profile
+  vaultctl config --profile staging VAULT_MOUNT=api  # Set mount for another profile
+  vaultctl config VAULT_ADDR=https://vault.example.com
+  vaultctl config VAULT_CACHE_TTL=3600
+  vaultctl config VAULT_PARALLEL=10
+EOF
+            ;;
+        read)
+            cat << 'EOF'
+Usage: vaultctl read [options] [<mount>] <path>[/<field>]
+
+Read a secret from Vault. If <field> is appended to the path, returns
+just that field value. Otherwise lists all keys at that path.
+If mount is omitted, VAULT_MOUNT env var or config is used.
+
+Options:
+  -b, --batch   Silent mode: suppress all messages, only return exit code
+  -v, --verbose Show vault commands being executed
+  -c, --clip    Copy output to clipboard (xclip or xsel)
+
+Examples:
+  vaultctl read cbi technology.cbi/github.com/api-token
+  vaultctl read users john/cbi JENKINS_USERNAME
+  vaultctl read technology.cbi/github.com/api-token   # uses VAULT_MOUNT
+  vaultctl read -b cbi path/to/secret/field           # silent, check exit code only
+EOF
+            ;;
+        write)
+            cat << 'EOF'
+Usage: vaultctl write [<mount>] <path> <key>=<value> [<key>=<value> ...]
+       vaultctl write [<mount>] <path> <key>=@<file>   # read value from file
+       vaultctl write [<mount>] <path> @<json-file>    # bulk write from JSON
+
+Write one or more secrets to Vault. If mount is omitted, VAULT_MOUNT
+env var or config is used.
+
+Examples:
+  vaultctl write cbi technology.cbi/github.com api-token=abc123
+  vaultctl write users john/cbi username=john password=secret
+  vaultctl write cbi myproject/db password=@/run/secrets/db.pass
+  vaultctl write technology.cbi/github.com api-token=abc123  # uses VAULT_MOUNT
+EOF
+            ;;
+        find)
+            cat << 'EOF'
+Usage: vaultctl find <mount> [pattern] [options]
+
+Search for secret paths in a Vault mount. Results are cached locally
+to speed up subsequent searches.
+
+Arguments:
+  mount     Vault mount point to search (e.g. cbi, users)
+  pattern   Optional glob pattern (default: * = all paths)
+
+Options:
+  --no-cache            Bypass cache, scan live (still updates cache)
+  --no-cache-write      Scan live without updating the cache
+  -b, --bare            Output raw paths only (no progress or log messages)
+  --clear-cache         Clear cached index for this mount and exit
+  --clear-all-cache     Clear all mount caches and exit (mount not required)
+  --cache-info          Show cache status for this mount (or all if no mount)
+  --cache-ttl <s>       Override cache TTL in seconds (default: 3600)
+  --parallel <n>        Number of parallel scan workers
+
+Examples:
+  vaultctl find users                        # List all paths in users mount
+  vaultctl find users '*/cbi/*'              # Find paths under any user's cbi dir
+  vaultctl find cbi 'technology.cbi/*'       # Find paths under technology.cbi
+  vaultctl find users john/* --no-cache      # Force live scan
+  vaultctl find users --clear-cache          # Invalidate cached index
+  vaultctl find --clear-all-cache            # Invalidate all caches
+  vaultctl find cbi 'tech*' -b               # Bare output for piping
+EOF
+            ;;
+        mv)
+            cat << 'EOF'
+Usage: vaultctl mv <mount> <src-path> <dst-path>
+
+Move (rename) a secret path within a mount. Copies all fields to the
+new path then permanently deletes the source.
+
+Examples:
+  vaultctl mv cbi technology.cbi/old-repo technology.cbi/new-repo
+  vaultctl mv users john/old-path john/new-path
+
+  # Bulk rename using find + mv:
+  vaultctl find cbi '*repo3.*' -b | while read p; do
+    vaultctl mv cbi "$p" "$(echo "$p" | sed 's/repo3/repo/')"
+  done
+EOF
+            ;;
+        rm)
+            cat << 'EOF'
+Usage: vaultctl rm [-f] <mount> <path>
+
+Permanently delete a secret path and all its versions/metadata.
+
+Options:
+  -f, --force   Skip confirmation prompt
+
+Examples:
+  vaultctl rm cbi technology.cbi/old-repo.eclipse.org
+  vaultctl rm -f users john/deprecated-key
+EOF
+            ;;
+        renew)
+            cat << 'EOF'
+Usage: vaultctl renew [increment]
+
+Renew the current Vault token. Default increment is 2h.
+
+Arguments:
+  increment   Token TTL increment (e.g. 1h, 30m, 2h). Default: 2h
+
+Examples:
+  vaultctl renew
+  vaultctl renew 8h
+EOF
+            ;;
+        export-vault)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-vault)
+
+Export Vault authentication variables (VAULT_ADDR, VAULT_TOKEN) to the
+current shell session. Useful for running the vault CLI directly.
+
+Examples:
+  eval $(vaultctl export-vault)
+  vault kv list cbi/
+EOF
+            ;;
+        export-env)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-env [options] <mount> <path> <ENV_VAR[:key]> [...])
+
+Export specific secrets from a Vault path as environment variables.
+If ENV_VAR:key is provided, the env var name and vault key can differ.
+If only ENV_VAR is provided, it is used as both the env var name and vault key.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-env users john USER:username PASS:password)
+  eval $(vaultctl export-env cbi technology.cbi/github.com API_TOKEN:api-token)
+  eval $(vaultctl export-env users john username --prefix MY_ --uppercase)
+EOF
+            ;;
+        export-env-all)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-env-all [options] <mount> <path>)
+
+Export ALL secrets from a Vault mount/path as environment variables.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-env-all users john)
+  eval $(vaultctl export-env-all cbi technology.cbi/github.com --prefix GH_ --uppercase)
+EOF
+            ;;
+        export-users)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users [options] <ENV_VAR[:key]> [...])
+
+Export specific secrets from users/<your-username>/ as environment variables.
+Username is derived from the VAULT_USERNAME config or your email address.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users JENKINS_USERNAME JENKINS_PASSWORD)
+  eval $(vaultctl export-users jenkins_username --prefix CI_ --uppercase)
+EOF
+            ;;
+        export-users-all)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users-all [options])
+
+Export ALL secrets from users/<your-username>/ as environment variables.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users-all)
+  eval $(vaultctl export-users-all --prefix MY_ --uppercase)
+EOF
+            ;;
+        export-users-path)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users-path [options] <subpath> <ENV_VAR[:key]> [...])
+
+Export specific secrets from users/<your-username>/<subpath>/ as environment variables.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users-path cbi JENKINS_USERNAME)
+  eval $(vaultctl export-users-path cbi JENKINS_USERNAME --prefix CBI_)
+EOF
+            ;;
+        export-users-path-all)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users-path-all [options] <subpath>)
+
+Export ALL secrets from users/<your-username>/<subpath>/ as environment variables.
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users-path-all cbi)
+  eval $(vaultctl export-users-path-all cbi --prefix CBI_ --uppercase)
+EOF
+            ;;
+        export-users-cbi)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users-cbi [options] <ENV_VAR[:key]> [...])
+
+Export specific secrets from users/<your-username>/cbi/ as environment variables.
+Shorthand for: vaultctl export-users-path cbi ...
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users-cbi JENKINS_USERNAME JENKINS_PASSWORD)
+  eval $(vaultctl export-users-cbi JENKINS_USERNAME --prefix CBI_)
+EOF
+            ;;
+        export-users-cbi-all)
+            cat << 'EOF'
+Usage: eval $(vaultctl export-users-cbi-all [options])
+
+Export ALL secrets from users/<your-username>/cbi/ as environment variables.
+Shorthand for: vaultctl export-users-path-all cbi
+
+Options:
+  --prefix <PREFIX>   Prepend prefix to all variable names
+  --uppercase         Convert variable names to uppercase
+
+Examples:
+  eval $(vaultctl export-users-cbi-all)
+  eval $(vaultctl export-users-cbi-all --prefix CBI_ --uppercase)
+EOF
+            ;;
+        select)
+            cat << 'EOF'
+Usage: vaultctl select [<name> | list | create <name> [--addr URL] | delete <name>]
+
+Manage and switch between Vault instance profiles. All profiles are stored
+in ~/.vaultctl using INI sections. Each profile has its own token file and
+cache directory.
+
+Subcommands:
+  (none)                      Show active profile info
+  list                        List all profiles with active marker
+  <name>                      Switch to a profile
+  create <name> [--addr URL]  Create a new profile section
+  delete <name>               Delete a profile (not active, not default)
+
+Options for create:
+  --addr <URL>   Set the Vault server URL for the new profile
+
+Examples:
+  vaultctl select                                            # Show active profile
+  vaultctl select list                                       # List all profiles
+  vaultctl select staging                                    # Switch to staging
+  vaultctl select create staging --addr https://vault.staging.example.com
+  vaultctl select delete staging                             # Delete staging profile
+EOF
+            ;;
+        *)
+            log_error "No help available for command: $cmd"
+            return 1
+            ;;
+    esac
+}
+
 # Show help
 show_help() {
     cat << EOF
@@ -2336,11 +3094,13 @@ Commands:
   status
       Show current authentication status
       
-  config [<KEY>=<value>]
-      Manage vaultctl configuration
-      Usage: vaultctl config                    # Show current config
-             vaultctl config VAULT_MOUNT=cbi   # Set default mount
-      Supported keys: VAULT_MOUNT
+  config [--profile <name>] [<KEY>=<value>]
+      Manage vaultctl configuration (per-profile)
+      Usage: vaultctl config                               # Show active profile's config
+             vaultctl config --profile <name>             # Show a specific profile's config
+             vaultctl config VAULT_MOUNT=cbi              # Set mount for active profile
+             vaultctl config --profile staging VAULT_MOUNT=api  # Set mount for another profile
+      Supported keys: VAULT_MOUNT, VAULT_ADDR, VAULT_CACHE_TTL, VAULT_PARALLEL
       
   export-vault
       Export vault environment variables for current shell
@@ -2420,12 +3180,21 @@ Commands:
       Export ALL secrets from users/<username>/cbi
       Usage: vaultctl export-users-cbi-all
       
+  select [<name> | list | create <name> [--addr URL] | delete <name>]
+      Manage and switch between vault instance profiles.
+      All profiles are stored in a single ~/.vaultctl file using INI sections.
+      Usage: vaultctl select                          # Show active profile
+             vaultctl select list                     # List all profiles
+             vaultctl select <name>                   # Switch to profile
+             vaultctl select create <name> [--addr URL]  # Create a new profile
+             vaultctl select delete <name>            # Delete a profile
+
   renew [increment]
       Renew the Vault token
       Usage: vaultctl renew [increment]
       Options:
         increment  - Optional increment value (default: 2h)
-      
+
   help
       Show this help message
 
@@ -2481,8 +3250,16 @@ Examples:
   eval \$(vaultctl export-env-all cbi technology.cbi/github.com --prefix GH_ --uppercase) # With options
   vaultctl logout                                       # Log out and revoke token
 
+  # Profiles (multi-instance)
+  vaultctl select                                       # Show active profile
+  vaultctl select list                                  # List all profiles
+  vaultctl select create staging --addr https://vault.staging.example.com
+  vaultctl select staging                               # Switch to staging profile
+  vaultctl select default                               # Switch back to default
+  vaultctl select delete staging                        # Delete staging profile
+
 Configuration:
-  Username saved in: $VAULT_CONFIG_FILE
+  Config file:       $VAULT_CONFIG_FILE  (all profiles stored here)
   Token stored in:   $VAULT_TOKEN_FILE
 
 EOF
@@ -2500,15 +3277,18 @@ main() {
     
     case "$command" in
         login)
-            cmd_login
+            shift
+            cmd_login "$@"
             exit $?
             ;;
         logout)
-            cmd_logout
+            shift
+            cmd_logout "$@"
             exit $?
             ;;
         status)
-            cmd_status
+            shift
+            cmd_status "$@"
             exit $?
             ;;
         config)
@@ -2517,7 +3297,8 @@ main() {
             exit $?
             ;;
         export-vault)
-            cmd_export_vault
+            shift
+            cmd_export_vault "$@"
             exit $?
             ;;
         read)
@@ -2583,6 +3364,11 @@ main() {
         export-users-cbi-all)
             shift
             cmd_export_users_cbi_all "$@"
+            exit $?
+            ;;
+        select)
+            shift
+            cmd_select "$@"
             exit $?
             ;;
         renew)
