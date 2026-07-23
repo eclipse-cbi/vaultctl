@@ -1850,18 +1850,20 @@ cmd_export_vault() {
     # own output from a previous run, masking a profile switch made in between.
     unset VAULT_TOKEN VAULT_ADDR VAULT_MOUNT VAULT_USERNAME
 
+    # Load config first so VAULT_ADDR is set before token validation below
+    # (load_token_from_file checks the token via `vault token lookup`, which
+    # needs VAULT_ADDR to reach the right server).
+    load_config &>/dev/null || true
+
     # Load token silently (redirect all output to /dev/null)
     if ! load_token_from_file &>/dev/null; then
         echo "Error: Not authenticated. Run \"vaultctl login\" first." >&2
         return 1
     fi
-    
+
     # Load username if available (silently)
     load_username_from_config &>/dev/null || true
-    
-    # Load config to get VAULT_MOUNT if available (silently)
-    load_config &>/dev/null || true
-    
+
     # Output ONLY export commands (no log messages)
     echo "export VAULT_ADDR='$VAULT_ADDR'"
     echo "export VAULT_TOKEN='$VAULT_TOKEN'"
