@@ -1844,6 +1844,12 @@ cmd_rm() {
 # Command: export-vault
 cmd_export_vault() {
     [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && { show_command_help export-vault; return 0; }
+
+    # Force a fresh reload for the active profile: load_token_from_file/load_config
+    # reuse already-exported env vars, which would otherwise be this very command's
+    # own output from a previous run, masking a profile switch made in between.
+    unset VAULT_TOKEN VAULT_ADDR VAULT_MOUNT VAULT_USERNAME
+
     # Load token silently (redirect all output to /dev/null)
     if ! load_token_from_file &>/dev/null; then
         echo "Error: Not authenticated. Run \"vaultctl login\" first." >&2
